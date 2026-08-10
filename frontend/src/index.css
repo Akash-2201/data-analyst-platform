@@ -1,0 +1,28 @@
+:root {
+  --paper: #faf9f5;
+  --ink: #171714;
+  --ink-soft: #55534a;
+  --line: #dcd8cc;
+  --accent: #1c6e8c;
+  --accent-soft: #e4eef1;
+  --flag: #b0472b;
+  --flag-soft: #f6e7e2;
+  --good: #3a6b45;
+  --font-body: "Inter", -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+a {
+  color: var(--accent);
+}
