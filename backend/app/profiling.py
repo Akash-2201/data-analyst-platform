@@ -34,13 +34,16 @@ def _safe(value: Any) -> Any:
 def _infer_semantic_type(series: pd.Series, dtype_str: str) -> str:
     """A light heuristic on top of the pandas dtype, useful before the user
     tells us what a column actually means."""
-    name = series.name.lower() if isinstance(series.name, str) else ""
+    name = str(series.name).lower() if series.name is not None else ""
+    non_neg_keys = ("age", "salary", "experience", "income", "years", "price", "amount", "cost")
 
     if "date" in dtype_str or "datetime" in dtype_str:
         return "datetime"
     if dtype_str.startswith(("int", "float")):
         if any(key in name for key in ("id", "code", "zip", "postal")):
             return "identifier"
+        if any(key in name for key in non_neg_keys):
+            return "non_negative_numeric"
         return "numeric"
     if dtype_str == "bool":
         return "boolean"
@@ -49,6 +52,17 @@ def _infer_semantic_type(series: pd.Series, dtype_str: str) -> str:
     non_null = series.dropna()
     if non_null.empty:
         return "text"
+
+    # Check if object column is mostly numeric (e.g. numeric column containing 'N/A' text)
+    coerced = pd.to_numeric(non_null, errors="coerce")
+    valid_num_cnt = int(coerced.notna().sum())
+    if len(non_null) > 0 and (valid_num_cnt / len(non_null)) >= 0.5 and valid_num_cnt >= 1:
+        if any(key in name for key in non_neg_keys):
+            return "non_negative_numeric"
+        if any(key in name for key in ("id", "code", "zip", "postal")):
+            return "identifier"
+        return "numeric"
+
     sample = non_null.astype(str).head(200)
     if any(key in name for key in ("email",)):
         return "email"
@@ -63,6 +77,8 @@ def _infer_semantic_type(series: pd.Series, dtype_str: str) -> str:
 
 
 def _numeric_stats(series: pd.Series) -> dict[str, Any] | None:
+    if pd.api.types.is_bool_dtype(series):
+        return None
     numeric = pd.to_numeric(series, errors="coerce").dropna()
     if numeric.empty:
         return None

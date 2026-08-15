@@ -1,0 +1,27 @@
+# Database & Storage
+local.db
+*.db
+storage_data/
+*.sqlite
+*.sqlite3
+
+# Keys & Secrets
+.env
+*.env
+*.key
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+backend/venv/
+.pytest_cache/
+
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.DS_Store
