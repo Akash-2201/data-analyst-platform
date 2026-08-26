@@ -1,4 +1,4 @@
-﻿"""
+"""
 AI-powered cleaning suggestions.
 
 Key design principles:
@@ -76,12 +76,31 @@ def _edit_distance(a: str, b: str) -> int:
     return dp[lb]
 
 
-def _passes_edit_distance_check(canonical: str, variant: str) -> bool:
+def _is_abbreviation_or_initial(canonical: str, variant: str) -> bool:
+    """Check if variant could be an abbreviation/initial of canonical."""
+    canon_l = canonical.strip().lower()
+    var_l = variant.strip().lower()
+    if not canon_l or not var_l:
+        return False
+    # Single initial (e.g. 'm' for 'male', 'f' for 'female')
+    if len(var_l) == 1 and canon_l.startswith(var_l):
+        return True
+    # Prefix abbreviation (e.g. 'mgmt' for 'management', 'eng' for 'engineering')
+    if canon_l.startswith(var_l):
+        return True
+    # Consonant contraction / subsequence (e.g. 'mgmt' in 'management')
+    it = iter(canon_l)
+    return all(ch in it for ch in var_l)
+
+
+def _passes_edit_distance_check(canonical: str, variant: str, confidence: str = "high") -> bool:
     """Return True if the variant is close enough to the canonical to be plausible."""
     canon_l = canonical.strip().lower()
     var_l = variant.strip().lower()
     if canon_l == var_l:
         return True  # case-only difference, always OK
+    if confidence == "low" or _is_abbreviation_or_initial(canonical, variant):
+        return True
     max_allowed = max(1, int(len(canon_l) * _MAX_EDIT_DISTANCE_RATIO))
     return _edit_distance(canon_l, var_l) <= max_allowed
 
@@ -144,15 +163,25 @@ RULES (read carefully, these are non-negotiable):
    - "Bengaluru" / "bangalore" / "BANGALORE" / "Banglore"  (same city, different spelling/case)
    - "Marketing" / "Marekting" / "MARKETING"  (same department, typo/case)
    - "active" / "ACTIVE" / "ACTVE"  (same status word, case + typo)
-3. The canonical form should be the most common or most correctly spelled variant.
-4. Include a "reasoning" field explaining why you grouped (or did not group) values.
-5. If no grouping is needed (all values are semantically distinct), return an empty list [].
+3. Also identify abbreviations or initials that likely represent the same category as a longer form already in the list — e.g. 'M' as an abbreviation of 'Male', 'F' of 'Female', 'Mgmt' of 'Management'. Include these as candidate variants, but mark them with a lower confidence level than exact-case/typo matches, since abbreviations can occasionally be ambiguous.
+4. The canonical form should be the most common or most correctly spelled variant.
+5. Include a "reasoning" field explaining why you grouped (or did not group) values.
+6. If no grouping is needed (all values are semantically distinct), return an empty list [].
 
 Return ONLY a JSON array. No markdown, no prose. Schema:
 [
   {{
     "canonical": "the target value",
-    "variants": ["variant1", "variant2"],
+    "variants": [
+      {{
+        "value": "variant1",
+        "confidence": "high"
+      }},
+      {{
+        "value": "variant2",
+        "confidence": "low"
+      }}
+    ],
     "reasoning": "one sentence explanation"
   }}
 ]
@@ -188,11 +217,39 @@ def _ai_semantic_grouping(
     last_error: Exception | None = None
     for model_name in models_to_try:
         try:
+            # Define structured output schema with confidence per variant
+            grouping_schema = genai_types.Schema(
+                type=genai_types.Type.ARRAY,
+                items=genai_types.Schema(
+                    type=genai_types.Type.OBJECT,
+                    properties={
+                        "canonical": genai_types.Schema(type=genai_types.Type.STRING),
+                        "variants": genai_types.Schema(
+                            type=genai_types.Type.ARRAY,
+                            items=genai_types.Schema(
+                                type=genai_types.Type.OBJECT,
+                                properties={
+                                    "value": genai_types.Schema(type=genai_types.Type.STRING),
+                                    "confidence": genai_types.Schema(
+                                        type=genai_types.Type.STRING,
+                                        description="Confidence: 'high' for exact-case/typos, 'low' for abbreviations/initials",
+                                    ),
+                                },
+                                required=["value", "confidence"],
+                            ),
+                        ),
+                        "reasoning": genai_types.Schema(type=genai_types.Type.STRING),
+                    },
+                    required=["canonical", "variants", "reasoning"],
+                ),
+            )
+
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     response_mime_type="application/json",
+                    response_schema=grouping_schema,
                 ),
             )
             groups: list[dict] = json.loads(response.text)
@@ -213,36 +270,57 @@ def _build_mapping_from_ai_groups(
     groups: list[dict[str, Any]],
     series: pd.Series,
     total_rows: int,
-) -> tuple[dict[str, str], bool, str | None]:
+) -> tuple[dict[str, str], bool, str | None, dict[str, Any]]:
     """
-    Convert AI semantic groups into a variant→canonical mapping.
+    Convert AI semantic groups into a variant→canonical mapping and extra metadata.
 
     Returns:
-        mapping:        {variant: canonical, ...}
+        mapping:        {variant: canonical, ...}  (high-confidence defaults)
         recommended:    False if the group is suspiciously large (> 40% of rows)
         warning_desc:   Optional description override when recommended=False
+        extra_info:     dict containing distinct_values, variant_confidences, and parsed groups
     """
     mapping: dict[str, str] = {}
+    variant_confidences: dict[str, str] = {}
     total_mapped_rows = 0
     warning_desc: str | None = None
     recommended = True
 
     non_null = series.dropna().astype(str)
     value_counts = non_null.value_counts()
+    distinct_values = {str(k): int(v) for k, v in value_counts.items()}
+
+    parsed_groups = []
 
     for group in groups:
         canonical = str(group.get("canonical", "")).strip()
-        variants = [str(v).strip() for v in group.get("variants", []) if str(v).strip()]
-        if not canonical or not variants:
+        raw_variants = group.get("variants", [])
+        reasoning = str(group.get("reasoning", "")).strip()
+        if not canonical or not raw_variants:
             continue
 
         group_mapping: dict[str, str] = {}
-        for variant in variants:
+        group_variant_list = []
+
+        for item in raw_variants:
+            if isinstance(item, dict):
+                variant = str(item.get("value", "")).strip()
+                conf = str(item.get("confidence", "high")).lower()
+                if conf not in ("high", "low"):
+                    conf = "high"
+            else:
+                variant = str(item).strip()
+                conf = "low" if len(variant) <= 2 and len(canonical) > 2 else "high"
+
+            if not variant:
+                continue
+
             if variant == canonical:
+                group_variant_list.append({"value": variant, "confidence": conf, "count": int(value_counts.get(variant, 0))})
                 continue  # no-op mapping
 
             # Mechanical sanity check: reject implausible variant pairings
-            if not _passes_edit_distance_check(canonical, variant):
+            if not _passes_edit_distance_check(canonical, variant, confidence=conf):
                 logger.warning(
                     "Rejected AI grouping: %r → %r (edit distance too large)", variant, canonical
                 )
@@ -255,10 +333,20 @@ def _build_mapping_from_ai_groups(
                 )
                 continue
 
-            group_mapping[variant] = canonical
+            variant_confidences[variant] = conf
+            group_variant_list.append({"value": variant, "confidence": conf, "count": int(value_counts.get(variant, 0))})
+
+            # High confidence mappings are applied by default; low confidence (abbreviations) are suggested for manual review
+            if conf == "high":
+                group_mapping[variant] = canonical
             total_mapped_rows += int(value_counts.get(variant, 0))
 
         mapping.update(group_mapping)
+        parsed_groups.append({
+            "canonical": canonical,
+            "reasoning": reasoning,
+            "variants": group_variant_list,
+        })
 
     # Large-group flag: if this mapping would touch > 40% of rows, require manual review
     if total_rows > 0 and mapping and (total_mapped_rows / total_rows) > _MAX_GROUP_FRACTION:
@@ -268,7 +356,13 @@ def _build_mapping_from_ai_groups(
             f"({100 * total_mapped_rows / total_rows:.0f}%) — review carefully before applying."
         )
 
-    return mapping, recommended, warning_desc
+    extra_info = {
+        "distinct_values": distinct_values,
+        "variant_confidences": variant_confidences,
+        "groups": parsed_groups,
+    }
+
+    return mapping, recommended, warning_desc, extra_info
 
 
 def _fill_standardize_mapping_ai(
@@ -276,10 +370,10 @@ def _fill_standardize_mapping_ai(
     column: str,
     client: Any,
     models_to_try: list[str],
-) -> tuple[dict[str, str], bool, str | None]:
+) -> tuple[dict[str, str], bool, str | None, dict[str, Any]]:
     """
     Primary path: use Gemini for semantic grouping.
-    Returns (mapping, recommended, warning_desc).
+    Returns (mapping, recommended, warning_desc, extra_info).
     Falls back to difflib on failure.
     """
     series = df[column]
@@ -290,29 +384,47 @@ def _fill_standardize_mapping_ai(
     if groups is None:
         # Gemini failed for this column — fall back to difflib
         logger.info("Falling back to difflib for column %r", column)
-        clusters = find_near_duplicate_categories(series)
-        mapping: dict[str, str] = {}
-        for cluster in clusters:
-            canonical = cluster[0]
-            for variant in cluster[1:]:
-                mapping[variant] = canonical
-        return mapping, True, None
+        return _fill_standardize_mapping_difflib(df, column)
 
-    mapping, recommended, warning_desc = _build_mapping_from_ai_groups(groups, series, total_rows)
-    return mapping, recommended, warning_desc
+    return _build_mapping_from_ai_groups(groups, series, total_rows)
 
 
-def _fill_standardize_mapping_difflib(df: pd.DataFrame, column: str) -> dict[str, str]:
+def _fill_standardize_mapping_difflib(
+    df: pd.DataFrame, column: str
+) -> tuple[dict[str, str], bool, str | None, dict[str, Any]]:
     """Fallback: plain difflib clustering."""
     if column not in df.columns:
-        return {}
-    clusters = find_near_duplicate_categories(df[column])
+        return {}, True, None, {}
+    series = df[column]
+    non_null = series.dropna().astype(str)
+    value_counts = non_null.value_counts()
+    distinct_values = {str(k): int(v) for k, v in value_counts.items()}
+
+    clusters = find_near_duplicate_categories(series)
     mapping: dict[str, str] = {}
+    variant_confidences: dict[str, str] = {}
+    parsed_groups = []
+
     for cluster in clusters:
         canonical = cluster[0]
-        for variant in cluster[1:]:
+        variants = cluster[1:]
+        var_items = [{"value": canonical, "confidence": "high", "count": int(value_counts.get(canonical, 0))}]
+        for variant in variants:
             mapping[variant] = canonical
-    return mapping
+            variant_confidences[variant] = "high"
+            var_items.append({"value": variant, "confidence": "high", "count": int(value_counts.get(variant, 0))})
+        parsed_groups.append({
+            "canonical": canonical,
+            "reasoning": f"Clustered by character similarity to '{canonical}'",
+            "variants": var_items,
+        })
+
+    extra_info = {
+        "distinct_values": distinct_values,
+        "variant_confidences": variant_confidences,
+        "groups": parsed_groups,
+    }
+    return mapping, True, None, extra_info
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +466,12 @@ DATASET SUMMARY:
 """
 
 
+def _fill_standardize_mapping(df: pd.DataFrame, column: str) -> dict[str, str]:
+    """Helper alias for tests."""
+    mapping, _, _, _ = _fill_standardize_mapping_difflib(df, column)
+    return mapping
+
+
 # ---------------------------------------------------------------------------
 # Validation + enrichment
 # ---------------------------------------------------------------------------
@@ -361,10 +479,12 @@ DATASET SUMMARY:
 def _validate_and_enrich(
     raw: dict[str, Any],
     df: pd.DataFrame,
-    mapping_cache: dict[str, dict[str, str]],
-    ai_client: Any | None,
-    models_to_try: list[str],
+    mapping_cache: dict[str, dict[str, Any]],
+    ai_client: Any | None = None,
+    models_to_try: list[str] | None = None,
 ) -> dict[str, Any] | None:
+    if models_to_try is None:
+        models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
     operation = raw.get("operation", "")
     column = raw.get("column", "")
 
@@ -386,25 +506,35 @@ def _validate_and_enrich(
     if operation == "standardize_category":
         if column not in mapping_cache:
             if ai_client is not None:
-                mapping, rec, warn_desc = _fill_standardize_mapping_ai(
+                mapping, rec, warn_desc, extra_info = _fill_standardize_mapping_ai(
                     df, column, ai_client, models_to_try
                 )
             else:
-                mapping = _fill_standardize_mapping_difflib(df, column)
-                rec, warn_desc = True, None
+                mapping, rec, warn_desc, extra_info = _fill_standardize_mapping_difflib(df, column)
 
-            mapping_cache[column] = {"mapping": mapping, "recommended": rec, "warn_desc": warn_desc}
+            mapping_cache[column] = {
+                "mapping": mapping,
+                "recommended": rec,
+                "warn_desc": warn_desc,
+                "extra_info": extra_info,
+            }
 
         cached = mapping_cache[column]
         mapping = cached["mapping"]
         recommended = cached["recommended"]
         warn_desc = cached.get("warn_desc")
+        extra_info = cached.get("extra_info", {})
 
-        if not mapping:
+        params["mapping"] = mapping
+        params["distinct_values"] = extra_info.get("distinct_values", {})
+        params["variant_confidences"] = extra_info.get("variant_confidences", {})
+        params["groups"] = extra_info.get("groups", [])
+
+        # If there are no groups / distinct variants, skip
+        if not mapping and not extra_info.get("groups"):
             logger.warning("standardize_category for %r: no clusters found -- skipping", column)
             return None
 
-        params["mapping"] = mapping
         if not recommended and warn_desc:
             description = warn_desc
 
@@ -455,7 +585,7 @@ def generate_ai_suggestions(
         from google.genai import types as genai_types
 
         client = genai.Client(api_key=api_key)
-        models_to_try = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
+        models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
 
         summary = _build_compact_summary(profile)
         prompt = _build_prompt(summary)

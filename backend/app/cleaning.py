@@ -15,6 +15,21 @@ from typing import Any
 import pandas as pd
 
 
+OPPOSITES: set[tuple[str, str]] = {
+    ("male", "female"), ("female", "male"),
+    ("active", "inactive"), ("inactive", "active"),
+    ("yes", "no"), ("no", "yes"),
+    ("true", "false"), ("false", "true"),
+    ("pass", "fail"), ("fail", "pass"),
+    ("open", "closed"), ("closed", "open"),
+    ("in", "out"), ("out", "in"),
+    ("on", "off"), ("off", "on"),
+    ("high", "low"), ("low", "high"),
+    ("good", "bad"), ("bad", "good"),
+    ("m", "f"), ("f", "m"),
+}
+
+
 def find_near_duplicate_categories(
     series: pd.Series, cutoff: float = 0.6
 ) -> list[list[str]]:
@@ -46,8 +61,13 @@ def find_near_duplicate_categories(
         possibility_map = {}
         for p in possibilities:
             p_clean = p.strip().lower()
+            if (canonical_clean, p_clean) in OPPOSITES:
+                continue
             if p_clean not in possibility_map:
                 possibility_map[p_clean] = p
+
+        if not possibility_map:
+            continue
 
         matches_clean = difflib.get_close_matches(
             canonical_clean, list(possibility_map.keys()), n=len(possibility_map), cutoff=cutoff
@@ -56,6 +76,9 @@ def find_near_duplicate_categories(
         cluster = [canonical]
         for m_clean in matches_clean:
             for p in possibilities:
+                p_clean = p.strip().lower()
+                if (canonical_clean, p_clean) in OPPOSITES:
+                    continue
                 if p not in assigned and p != canonical and p.strip().lower() == m_clean:
                     cluster.append(p)
                     assigned.add(p)
@@ -152,7 +175,7 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "severity": "medium",
                 })
 
-        # Phase 1: Text cleanliness checks for text/categorical columns
+        # Text cleanliness checks for text/categorical columns
         if inferred_type in ("text", "categorical", "email", "phone") or str(col_series.dtype) == "object":
             non_null_str = col_series.dropna().astype(str)
             if not non_null_str.empty:
@@ -168,7 +191,40 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         "severity": "low",
                     })
 
-                # 1b. Inconsistent capitalization
+                # 1b. Fuzzy category consistency (standardize_category)
+                has_category_clusters = False
+                if inferred_type not in ("numeric", "non_negative_numeric", "identifier") and (
+                    inferred_type in ("categorical", "text")
+                    or (str(col_series.dtype) == "object" and col_series.nunique() < 50)
+                ):
+                    clusters = find_near_duplicate_categories(col_series)
+                    val_counts = non_null_str.value_counts().to_dict()
+                    val_counts = {str(k): int(v) for k, v in val_counts.items()}
+                    for cluster in clusters:
+                        canonical = cluster[0]
+                        variants = cluster[1:]
+                        mapping = {v: canonical for v in variants}
+                        variant_str = ", ".join(variants)
+                        suggestions.append({
+                            "id": str(uuid.uuid4()),
+                            "action": "standardize_category",
+                            "params": {
+                                "column": col_name,
+                                "mapping": mapping,
+                                "distinct_values": val_counts,
+                                "variant_confidences": {v: "high" for v in variants},
+                                "groups": [{
+                                    "canonical": canonical,
+                                    "reasoning": f"Clustered by character similarity to '{canonical}'",
+                                    "variants": [{"value": v, "confidence": "high", "count": int(val_counts.get(v, 0))} for v in cluster],
+                                }],
+                            },
+                            "description": f"{len(cluster)} spellings of '{canonical}' found ({variant_str}) — standardize to one?",
+                            "severity": "medium",
+                        })
+                        has_category_clusters = True
+
+                # 1c. Inconsistent capitalization
                 stripped_str = non_null_str.str.strip()
                 lower_groups = stripped_str.groupby(stripped_str.str.lower()).nunique()
                 inconsistent_groups = lower_groups[lower_groups > 1]
@@ -184,25 +240,6 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         "description": f"Normalize inconsistent capitalization in '{col_name}' ({len(inconsistent_groups)} variant group{'s' if len(inconsistent_groups) > 1 else ''})",
                         "severity": "low",
                     })
-
-        # Phase 2: Fuzzy category consistency
-        if inferred_type not in ("numeric", "non_negative_numeric", "identifier") and (
-            inferred_type in ("categorical", "text")
-            or (str(col_series.dtype) == "object" and col_series.nunique() < 50)
-        ):
-            clusters = find_near_duplicate_categories(col_series)
-            for cluster in clusters:
-                canonical = cluster[0]
-                variants = cluster[1:]
-                mapping = {v: canonical for v in variants}
-                variant_str = ", ".join(variants)
-                suggestions.append({
-                    "id": str(uuid.uuid4()),
-                    "action": "standardize_category",
-                    "params": {"column": col_name, "mapping": mapping},
-                    "description": f"{len(cluster)} spellings of '{canonical}' found ({variant_str}) — standardize to one?",
-                    "severity": "medium",
-                })
 
         # 3. Numeric outlier checks
         numeric_stats = col.get("numeric_stats")
@@ -301,6 +338,15 @@ def apply_pipeline(
             mapping = params.get("mapping", {})
             if col and col in cleaned_df.columns and mapping:
                 cleaned_df[col] = cleaned_df[col].replace(mapping)
+                resilient_mapping = {}
+                for k, v in mapping.items():
+                    k_str = str(k)
+                    resilient_mapping[k_str] = v
+                    resilient_mapping[k_str.strip()] = v
+                    resilient_mapping[k_str.lower()] = v
+                    resilient_mapping[k_str.upper()] = v
+                    resilient_mapping[k_str.title()] = v
+                cleaned_df[col] = cleaned_df[col].replace(resilient_mapping)
         elif action == "coerce_numeric":
             col = params.get("column")
             if col and col in cleaned_df.columns:

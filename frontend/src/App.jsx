@@ -1,21 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  BarChart, Bar,
+  LineChart, Line,
+  ScatterChart, Scatter,
+  PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer,
+} from "recharts";
+import {
   uploadDataset,
   getSuggestions,
   savePipeline,
   applyPipeline,
+  previewPipeline,
   downloadCleanedFile,
   sendChatMessage,
+  getChartData,
 } from "./api";
 import "./App.css";
 
-function ChatBot({ datasetId }) {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Convert a proposed_action from the chat API into a pipeline step shape. */
+function proposedActionToStep(proposed_action) {
+  const { column, operation, reasoning, severity = "medium" } = proposed_action;
+  const params = operation === "drop_duplicates" ? {} : { column };
+  return {
+    action: operation,
+    params,
+    description: reasoning,
+    severity,
+  };
+}
+
+function ChatBot({ datasetId, onPreviewChatAction }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     { sender: "assistant", text: "Ask me anything about your data" },
   ]);
   const [inputMsg, setInputMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  // Track inline pending action cards: array of { msgIdx, proposed_action, previewLoading }
+  const [pendingActions, setPendingActions] = useState([]);
 
   const chatEndRef = useRef(null);
 
@@ -36,10 +64,17 @@ function ChatBot({ datasetId }) {
 
     try {
       const res = await sendChatMessage(userText, datasetId);
+      const newMsgIdx = messages.length + 1; // +1 for user msg just added
       setMessages((prev) => [
         ...prev,
-        { sender: "assistant", text: res.reply || "No response received." },
+        { sender: "assistant", text: res.reply || "No response received.", proposed_action: res.proposed_action || null },
       ]);
+      if (res.proposed_action) {
+        setPendingActions((prev) => [
+          ...prev,
+          { msgIdx: newMsgIdx, proposed_action: res.proposed_action, previewLoading: false },
+        ]);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -47,6 +82,29 @@ function ChatBot({ datasetId }) {
       ]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePreviewFix = async (proposed_action, actionIdx) => {
+    if (!datasetId || !onPreviewChatAction) return;
+    // Mark this action as loading
+    setPendingActions((prev) =>
+      prev.map((a, i) => (i === actionIdx ? { ...a, previewLoading: true } : a))
+    );
+    try {
+      const step = proposedActionToStep(proposed_action);
+      const previewResult = await previewPipeline(datasetId, [step]);
+      // Lift to App — pass both the preview data AND the step so App knows what to apply
+      onPreviewChatAction(previewResult, [step]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { sender: "assistant", text: `Preview failed: ${err.message}` },
+      ]);
+    } finally {
+      setPendingActions((prev) =>
+        prev.map((a, i) => (i === actionIdx ? { ...a, previewLoading: false } : a))
+      );
     }
   };
 
@@ -79,14 +137,52 @@ function ChatBot({ datasetId }) {
 
           <div className="chat-body">
             <div className="chat-messages">
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`chat-bubble ${msg.sender === "user" ? "user" : "assistant"}`}
-                >
-                  {msg.text}
-                </div>
-              ))}
+              {messages.map((msg, idx) => {
+                // Find action card entries associated with this message index
+                const actionEntry = msg.proposed_action
+                  ? pendingActions.find((a) => {
+                      // Match by proposed_action reference (same column+operation)
+                      return (
+                        a.proposed_action.column === msg.proposed_action.column &&
+                        a.proposed_action.operation === msg.proposed_action.operation
+                      );
+                    })
+                  : null;
+
+                return (
+                  <div key={idx} className="chat-message-group">
+                    <div
+                      className={`chat-bubble ${msg.sender === "user" ? "user" : "assistant"}`}
+                    >
+                      {msg.text}
+                    </div>
+                    {msg.proposed_action && actionEntry !== undefined && (
+                      <div className="chat-action-card">
+                        <div className="chat-action-op">
+                          <span className="chat-action-label">Suggested fix</span>
+                          <span className="log-action">{msg.proposed_action.operation}</span>
+                          <span className="chat-action-col">on&nbsp;<strong>{msg.proposed_action.column}</strong></span>
+                        </div>
+                        <div className="chat-action-reasoning">{msg.proposed_action.reasoning}</div>
+                        <button
+                          className="chat-preview-btn"
+                          disabled={actionEntry?.previewLoading || !datasetId}
+                          onClick={() => {
+                            const idx2 = pendingActions.findIndex(
+                              (a) =>
+                                a.proposed_action.column === msg.proposed_action.column &&
+                                a.proposed_action.operation === msg.proposed_action.operation
+                            );
+                            handlePreviewFix(msg.proposed_action, idx2);
+                          }}
+                        >
+                          {actionEntry?.previewLoading ? "Loading preview…" : "Preview this fix"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {loading && (
                 <div className="chat-bubble assistant typing-indicator">
                   <span>Assistant is typing...</span>
@@ -232,6 +328,642 @@ function ColumnRow({ column, index }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Chart colours — a curated palette that works on white
+// ---------------------------------------------------------------------------
+const CHART_COLORS = [
+  "#1c6e8c", "#3aaa7d", "#e05a4b", "#f5a623", "#7b68ee",
+  "#20b2aa", "#ff7f50", "#9370db", "#32cd32", "#ff69b4",
+];
+
+// ---------------------------------------------------------------------------
+// ChartBuilder — interactive chart section rendered below the profiling report
+// ---------------------------------------------------------------------------
+function ChartBuilder({ datasetId, columns }) {
+  const allCols = columns || [];
+  // Heuristic column classification for smart defaults
+  const catCols = allCols.filter(
+    (c) => c.inferred_type === "categorical" || c.dtype === "object"
+  );
+  const numCols = allCols.filter(
+    (c) =>
+      c.inferred_type === "numeric" ||
+      ["int64", "float64", "int32", "float32", "int16", "float16"].includes(c.dtype)
+  );
+
+  const defaultX = (catCols[0] || allCols[0])?.name || "";
+  const defaultY = numCols[0]?.name || "";
+
+  const [chartType, setChartType] = useState("bar");
+  const [xCol, setXCol] = useState(defaultX);
+  const [yCol, setYCol] = useState(defaultY);
+  const [agg, setAgg] = useState("count");
+  const [chartData, setChartData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Y axis is required for line, scatter, and bar with sum/mean
+  const needsY =
+    chartType === "line" ||
+    chartType === "scatter" ||
+    (chartType === "bar" && agg !== "count");
+
+  const doFetch = async (overrides = {}) => {
+    const ct = overrides.chartType ?? chartType;
+    const xc = overrides.xCol ?? xCol;
+    const yc = overrides.yCol ?? yCol;
+    const ag = overrides.agg ?? agg;
+    const ny =
+      ct === "line" ||
+      ct === "scatter" ||
+      (ct === "bar" && ag !== "count");
+    if (!datasetId || !xc) return;
+    if (ny && !yc) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getChartData(datasetId, {
+        chartType: ct,
+        x: xc,
+        y: ny ? yc : undefined,
+        agg: ag,
+        useCleaned: true,
+      });
+      setChartData(data);
+    } catch (err) {
+      setError(err.message);
+      setChartData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-fetch on mount with sensible defaults
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (datasetId && defaultX) doFetch(); }, []);
+
+  const handleChartTypeChange = (e) => {
+    const newType = e.target.value;
+    setChartType(newType);
+    // Ensure we have a Y col when switching to a chart that needs it
+    if ((newType === "line" || newType === "scatter") && !yCol && defaultY) {
+      setYCol(defaultY);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Render helpers per chart type
+  // ---------------------------------------------------------------------------
+  const renderChartInner = () => {
+    if (!chartData) return null;
+    const { labels, values, x_label, y_label } = chartData;
+
+    if (chartType === "pie") {
+      // Limit to top 10 slices for legibility
+      const slices = labels.slice(0, 10).map((l, i) => ({
+        name: String(l),
+        value: values[i] ?? 0,
+      }));
+      return (
+        <ResponsiveContainer width="100%" height={340}>
+          <PieChart>
+            <Pie
+              data={slices}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              outerRadius={120}
+              label={({ name, percent }) =>
+                `${name} (${(percent * 100).toFixed(1)}%)`
+              }
+              labelLine={false}
+            >
+              {slices.map((_, i) => (
+                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(v) => [v.toLocaleString(), "Count"]}
+              contentStyle={{ fontSize: 12, borderRadius: 4 }}
+            />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
+
+    if (chartType === "bar") {
+      return (
+        <ResponsiveContainer width="100%" height={340}>
+          <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: "var(--ink-soft)" }}
+              angle={-38}
+              textAnchor="end"
+              interval={0}
+            />
+            <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 4 }}
+              formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]}
+            />
+            <Bar
+              dataKey="value"
+              name={y_label}
+              fill="#1c6e8c"
+              radius={[3, 3, 0, 0]}
+              maxBarSize={48}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (chartType === "line") {
+      return (
+        <ResponsiveContainer width="100%" height={340}>
+          <LineChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: "var(--ink-soft)" }}
+              angle={-38}
+              textAnchor="end"
+              interval={0}
+            />
+            <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 4 }}
+              formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]}
+            />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Line
+              type="monotone"
+              dataKey="value"
+              name={y_label}
+              stroke="#1c6e8c"
+              strokeWidth={2.5}
+              dot={{ r: 3, fill: "#1c6e8c" }}
+              activeDot={{ r: 5 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (chartType === "scatter") {
+      // Map category labels to an index on X axis for scatter positioning
+      const scatterData = labels.map((l, i) => ({
+        x: i,
+        y: values[i] ?? 0,
+        label: String(l),
+      }));
+      return (
+        <ResponsiveContainer width="100%" height={340}>
+          <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+            <XAxis
+              dataKey="x"
+              type="number"
+              name={x_label}
+              tick={{ fontSize: 11 }}
+              tickFormatter={(v) => String(labels[v] ?? v).slice(0, 12)}
+            />
+            <YAxis dataKey="y" type="number" name={y_label} tick={{ fontSize: 11 }} />
+            <Tooltip
+              cursor={{ strokeDasharray: "3 3" }}
+              content={({ payload }) => {
+                if (!payload?.length) return null;
+                const pt = payload[0]?.payload;
+                if (!pt) return null;
+                return (
+                  <div className="chart-scatter-tooltip">
+                    <div className="chart-scatter-tooltip-label">{pt.label}</div>
+                    <div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div>
+                  </div>
+                );
+              }}
+            />
+            <Scatter
+              name={y_label}
+              data={scatterData}
+              fill="#1c6e8c"
+              opacity={0.8}
+            />
+          </ScatterChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="chart-section smooth-expand">
+      <div className="ledger-header">Visualise your data</div>
+
+      <div className="chart-controls">
+        <div className="chart-control-group">
+          <label className="chart-label" htmlFor="chart-type-select">Chart type</label>
+          <select
+            id="chart-type-select"
+            className="chart-select"
+            value={chartType}
+            onChange={handleChartTypeChange}
+          >
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="scatter">Scatter</option>
+            <option value="pie">Pie</option>
+          </select>
+        </div>
+
+        <div className="chart-control-group">
+          <label className="chart-label" htmlFor="chart-x-select">X axis</label>
+          <select
+            id="chart-x-select"
+            className="chart-select"
+            value={xCol}
+            onChange={(e) => setXCol(e.target.value)}
+          >
+            {allCols.map((c) => (
+              <option key={c.name} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {needsY && (
+          <div className="chart-control-group">
+            <label className="chart-label" htmlFor="chart-y-select">Y axis</label>
+            <select
+              id="chart-y-select"
+              className="chart-select"
+              value={yCol}
+              onChange={(e) => setYCol(e.target.value)}
+            >
+              {(numCols.length > 0 ? numCols : allCols).map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="chart-control-group">
+          <label className="chart-label" htmlFor="chart-agg-select">Aggregation</label>
+          <select
+            id="chart-agg-select"
+            className="chart-select"
+            value={agg}
+            onChange={(e) => setAgg(e.target.value)}
+            disabled={chartType === "scatter" || chartType === "pie"}
+          >
+            <option value="count">Count</option>
+            <option value="sum">Sum</option>
+            <option value="mean">Mean</option>
+          </select>
+        </div>
+
+        <button
+          id="chart-generate-btn"
+          className="apply-button chart-go-btn"
+          onClick={() => doFetch()}
+          disabled={loading || !xCol || (needsY && !yCol)}
+        >
+          {loading ? "Loading…" : "Generate chart"}
+        </button>
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="chart-container">
+        {loading && (
+          <div className="chart-loading">
+            <div className="ledger-loading-track" style={{ width: 200 }}>
+              <div className="ledger-loading-bar" />
+            </div>
+            <span className="chart-loading-label">Generating chart…</span>
+          </div>
+        )}
+        {!loading && !chartData && (
+          <div className="chart-empty">
+            Select columns and click <strong>Generate chart</strong>
+          </div>
+        )}
+        {!loading && chartData && renderChartInner()}
+      </div>
+
+      {chartData && !loading && (
+        <div className="chart-meta">
+          {chartData.group_count} groups&nbsp;·&nbsp;{chartData.row_count?.toLocaleString()} rows
+          &nbsp;·&nbsp;{chartData.x_label} → {chartData.y_label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreviewPanel({ previewData, onConfirm, onCancel, loading }) {
+  if (!previewData) return null;
+
+  const { original_row_count, cleaned_row_count, column_diffs, step_log } = previewData;
+
+  return (
+    <div className="preview-panel smooth-expand">
+      <div className="preview-header">
+        <div className="preview-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          Preview — review before applying
+        </div>
+        <button className="preview-close-btn" onClick={onCancel} title="Dismiss preview">✕</button>
+      </div>
+
+      {/* Scrollable body — everything between header and the sticky footer */}
+      <div className="preview-body">
+        <div className="preview-summary-bar">
+          <span className="preview-summary-label">Rows</span>
+          <span className="preview-summary-val">{original_row_count?.toLocaleString()}</span>
+          <span className="preview-summary-arrow">→</span>
+          <span className={`preview-summary-val${cleaned_row_count !== original_row_count ? " changed" : ""}`}>
+            {cleaned_row_count?.toLocaleString()}
+          </span>
+          {cleaned_row_count !== original_row_count && (
+            <span className="preview-summary-delta">
+              ({original_row_count - cleaned_row_count} removed)
+            </span>
+          )}
+        </div>
+
+        {column_diffs && column_diffs.length > 0 ? (
+          <div className="preview-diffs">
+            {column_diffs
+              .filter((d) => d.column !== "(row count)")
+              .map((diff, idx) => (
+                <div className="preview-column-diff" key={idx}>
+                  <div className="preview-col-header">
+                    <span className="preview-col-name">{diff.column}</span>
+                    {diff.summary && <span className="preview-col-summary">{diff.summary}</span>}
+                    {diff.note && <span className="preview-col-note">{diff.note}</span>}
+                  </div>
+
+                  {diff.before && Object.keys(diff.before).length > 0 && (
+                    <div className="preview-value-table">
+                      <div className="preview-value-header">
+                        <span>Value</span>
+                        <span>Before</span>
+                        <span>After</span>
+                        <span>Change</span>
+                      </div>
+                      {(() => {
+                        const allKeys = new Set([
+                          ...Object.keys(diff.before || {}),
+                          ...Object.keys(diff.after || {}),
+                        ]);
+                        return [...allKeys].sort().map((key) => {
+                          const before = diff.before?.[key] ?? 0;
+                          const after = diff.after?.[key] ?? 0;
+                          const delta = after - before;
+                          const isRemoved = after === 0 && before > 0;
+                          const isNew = before === 0 && after > 0;
+                          return (
+                            <div
+                              className={`preview-value-row${
+                                isRemoved ? " removed" : isNew ? " added" : delta !== 0 ? " changed" : ""
+                              }`}
+                              key={key}
+                            >
+                              <span className="preview-val-name" title={key}>{key}</span>
+                              <span className="preview-val-count">{before || "—"}</span>
+                              <span className="preview-val-count">{after || "—"}</span>
+                              <span className={`preview-val-delta${delta > 0 ? " pos" : delta < 0 ? " neg" : ""}`}>
+                                {delta === 0 ? "" : delta > 0 ? `+${delta}` : delta}
+                              </span>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        ) : (
+          <div className="preview-no-changes">No value-level changes detected. Only structural operations will run.</div>
+        )}
+
+        {step_log && step_log.length > 0 && (
+          <div className="preview-step-log">
+            <div className="preview-step-log-title">Operations to execute</div>
+            {step_log.map((item, idx) => (
+              <div className="preview-step-row" key={idx}>
+                <span className="log-action">{item.action}</span>
+                <span className="log-desc">{item.description}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>{/* end .preview-body */}
+
+      <div className="preview-actions">
+        <button
+          className="apply-button confirm"
+          onClick={onConfirm}
+          disabled={loading}
+        >
+          {loading ? "Applying…" : "Confirm & Apply"}
+        </button>
+        <button
+          className="apply-button cancel"
+          onClick={onCancel}
+          disabled={loading}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CategoricalReviewCard({
+  column,
+  distinctValues = {},
+  variantConfidences = {},
+  groups = [],
+  mapping = {},
+  totalRows = 0,
+  onValueChange,
+}) {
+  const canonicalTargets = Array.from(
+    new Set([
+      ...groups.map((g) => g.canonical).filter(Boolean),
+      ...Object.values(mapping).filter((v) => v && v !== "(keep as-is)"),
+    ])
+  );
+
+  const [customInputs, setCustomInputs] = useState({});
+
+  const sortedDistinct = Object.entries(distinctValues).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="manual-review-card">
+      <div className="manual-review-header">
+        <div className="manual-review-title-group">
+          <span className="manual-review-title">{column}</span>
+          <span className="manual-review-badge">{sortedDistinct.length} distinct values</span>
+        </div>
+        <div className="cat-card-hint">
+          {groups.length > 0
+            ? `${groups.length} suggested target group${groups.length > 1 ? "s" : ""}`
+            : "Review and map values"}
+        </div>
+      </div>
+
+      <div className="cat-review-table">
+        <div className="cat-table-header">
+          <span>Distinct Raw Value</span>
+          <span>Count</span>
+          <span>Detection Type</span>
+          <span>Assign Canonical Group</span>
+        </div>
+
+        {sortedDistinct.map(([rawVal, count]) => {
+          const conf = variantConfidences[rawVal] || (canonicalTargets.includes(rawVal) ? "canonical" : "none");
+          const currentTarget = mapping[rawVal] || rawVal;
+          const isCustom = customInputs[rawVal] !== undefined;
+          const pct = totalRows > 0 ? ((count / totalRows) * 100).toFixed(1) : null;
+
+          return (
+            <div className="cat-table-row" key={rawVal}>
+              <div className="td-val">
+                <span className="raw-val-chip" title={rawVal}>
+                  {rawVal === "" ? "— (empty)" : rawVal}
+                </span>
+              </div>
+
+              <div className="td-count">
+                <span className="count-num">{count.toLocaleString()}</span>
+                {pct && <span className="count-pct">({pct}%)</span>}
+              </div>
+
+              <div className="td-conf">
+                {canonicalTargets.includes(rawVal) ? (
+                  <span className="conf-pill canonical">Canonical</span>
+                ) : conf === "low" ? (
+                  <span className="conf-pill low" title="Abbreviation or initial detected — defaults to keep original">
+                    Abbreviation (low conf)
+                  </span>
+                ) : conf === "high" ? (
+                  <span className="conf-pill high">Exact / Typo</span>
+                ) : (
+                  <span className="conf-pill neutral">Original</span>
+                )}
+              </div>
+
+              <div className="td-target">
+                {isCustom ? (
+                  <div className="custom-input-group">
+                    <input
+                      type="text"
+                      className="custom-target-input"
+                      placeholder="Enter canonical target..."
+                      value={customInputs[rawVal]}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCustomInputs((prev) => ({ ...prev, [rawVal]: val }));
+                        onValueChange(column, rawVal, val || rawVal);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="custom-cancel-btn"
+                      onClick={() => {
+                        setCustomInputs((prev) => {
+                          const next = { ...prev };
+                          delete next[rawVal];
+                          return next;
+                        });
+                        onValueChange(column, rawVal, rawVal);
+                      }}
+                      title="Cancel custom target"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    className={`cat-target-select${currentTarget !== rawVal ? " mapped" : ""}`}
+                    value={currentTarget}
+                    onChange={(e) => {
+                      const selected = e.target.value;
+                      if (selected === "__custom__") {
+                        setCustomInputs((prev) => ({ ...prev, [rawVal]: "" }));
+                      } else {
+                        onValueChange(column, rawVal, selected);
+                      }
+                    }}
+                  >
+                    <option value={rawVal}>Keep original: "{rawVal}"</option>
+                    {canonicalTargets
+                      .filter((c) => c !== rawVal)
+                      .map((c) => (
+                        <option key={c} value={c}>
+                          Merge into: "{c}"
+                        </option>
+                      ))}
+                    <option value="__custom__">+ Custom canonical group...</option>
+                  </select>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StructuralReviewList({ suggestions = [], selectedIds, onToggle }) {
+  if (suggestions.length === 0) return null;
+
+  return (
+    <div className="structural-review-section">
+      <div className="structural-header">
+        <span className="structural-title">Data Quality & Structural Fixes</span>
+        <span className="structural-subtitle">
+          Missing value imputations, outlier filtering, numeric coercion, etc.
+        </span>
+      </div>
+
+      <div className="structural-list">
+        {suggestions.map((s) => {
+          const isChecked = selectedIds.has(s.id);
+          return (
+            <label className={`structural-row${isChecked ? " selected" : ""}`} key={s.id}>
+              <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={() => onToggle(s.id)}
+              />
+              <div className="structural-info">
+                <span className="structural-action">{s.action}</span>
+                <span className="structural-desc">{s.description}</span>
+              </div>
+              <span className={`severity-badge ${s.severity}`}>{s.severity}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -240,11 +972,19 @@ export default function App() {
   // Suggestions & cleaning pipeline state
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [manualMappings, setManualMappings] = useState({});
+  const [selectedStructuralIds, setSelectedStructuralIds] = useState(new Set());
   const [cleaningLoading, setCleaningLoading] = useState(false);
   const [cleaningError, setCleaningError] = useState(null);
   const [cleaningResult, setCleaningResult] = useState(null);
   const [downloadingFormat, setDownloadingFormat] = useState(null);
+
+  // Preview-before-apply state
+  const [previewData, setPreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Steps override — set when chat proposes an action that we want to apply.
+  const [chatPendingSteps, setChatPendingSteps] = useState(null);
 
   const handleFile = async (file) => {
     setLoading(true);
@@ -252,7 +992,8 @@ export default function App() {
     setCleaningResult(null);
     setCleaningError(null);
     setSuggestions([]);
-    setSelectedIds(new Set());
+    setManualMappings({});
+    setSelectedStructuralIds(new Set());
 
     try {
       const data = await uploadDataset(file);
@@ -273,13 +1014,42 @@ export default function App() {
     try {
       const list = await getSuggestions(datasetId);
       setSuggestions(list);
-      // Checked by default for high and medium severity
-      const defaults = new Set(
+
+      // Initialize manualMappings for categorical columns
+      const initMappings = {};
+      list.forEach((s) => {
+        if (s.action === "standardize_category") {
+          const col = s.params?.column;
+          const dv = s.params?.distinct_values || {};
+          const aiMapping = s.params?.mapping || {};
+          const confidences = s.params?.variant_confidences || {};
+          if (col) {
+            initMappings[col] = {};
+            Object.keys(dv).forEach((val) => {
+              // High-confidence exact/typo variants default to AI recommendation.
+              // Low-confidence abbreviations default to self (keep original / unmerged).
+              if (confidences[val] === "high" && aiMapping[val]) {
+                initMappings[col][val] = aiMapping[val];
+              } else {
+                initMappings[col][val] = val;
+              }
+            });
+          }
+        }
+      });
+      setManualMappings(initMappings);
+
+      // Checked by default for high and medium severity structural issues
+      const structDefaults = new Set(
         list
-          .filter((s) => s.severity === "high" || s.severity === "medium")
+          .filter(
+            (s) =>
+              s.action !== "standardize_category" &&
+              (s.severity === "high" || s.severity === "medium")
+          )
           .map((s) => s.id)
       );
-      setSelectedIds(defaults);
+      setSelectedStructuralIds(structDefaults);
     } catch (err) {
       setCleaningError(`Could not load suggestions: ${err.message}`);
     } finally {
@@ -287,8 +1057,18 @@ export default function App() {
     }
   };
 
-  const toggleSuggestion = (id) => {
-    setSelectedIds((prev) => {
+  const handleMappingChange = (column, rawVal, targetVal) => {
+    setManualMappings((prev) => ({
+      ...prev,
+      [column]: {
+        ...(prev[column] || {}),
+        [rawVal]: targetVal,
+      },
+    }));
+  };
+
+  const toggleStructuralSuggestion = (id) => {
+    setSelectedStructuralIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -299,24 +1079,83 @@ export default function App() {
     });
   };
 
-  const handleApplyCleaning = async () => {
+  const _buildApprovedSteps = () => {
+    const steps = [];
+
+    // 1. Categorical standardize steps from user manual mappings
+    Object.entries(manualMappings).forEach(([col, valMap]) => {
+      const mapping = {};
+      Object.entries(valMap).forEach(([rawVal, target]) => {
+        if (target && target !== rawVal && target !== "(keep as-is)") {
+          mapping[rawVal] = target;
+        }
+      });
+      if (Object.keys(mapping).length > 0) {
+        steps.push({
+          action: "standardize_category",
+          params: { column: col, mapping },
+          description: `Standardize ${Object.keys(mapping).length} value(s) in '${col}'`,
+          severity: "medium",
+        });
+      }
+    });
+
+    // 2. Structural steps
+    suggestions
+      .filter((s) => s.action !== "standardize_category" && selectedStructuralIds.has(s.id))
+      .forEach((s) => {
+        steps.push({
+          action: s.action,
+          params: s.params,
+          description: s.description,
+          severity: s.severity,
+        });
+      });
+
+    return steps;
+  };
+
+  const handlePreview = async () => {
+    if (!report?.dataset_id) return;
+    setPreviewLoading(true);
+    setCleaningError(null);
+    setPreviewData(null);
+    setChatPendingSteps(null);
+
+    try {
+      const steps = _buildApprovedSteps();
+      if (steps.length === 0) {
+        setCleaningError("No modifications or fixes are currently selected to preview.");
+        return;
+      }
+      const preview = await previewPipeline(report.dataset_id, steps);
+      setPreviewData(preview);
+    } catch (err) {
+      setCleaningError(`Preview failed: ${err.message}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleChatPreviewAction = (previewResult, steps) => {
+    setChatPendingSteps(steps);
+    setPreviewData(previewResult);
+    setCleaningError(null);
+  };
+
+  const handleConfirmApply = async () => {
     if (!report?.dataset_id) return;
     setCleaningLoading(true);
     setCleaningError(null);
 
-    const approvedSteps = suggestions
-      .filter((s) => selectedIds.has(s.id))
-      .map((s) => ({
-        action: s.action,
-        params: s.params,
-        description: s.description,
-        severity: s.severity,
-      }));
+    const stepsToApply = chatPendingSteps !== null ? chatPendingSteps : _buildApprovedSteps();
 
     try {
-      await savePipeline(report.dataset_id, approvedSteps);
+      await savePipeline(report.dataset_id, stepsToApply);
       const res = await applyPipeline(report.dataset_id);
       setCleaningResult(res);
+      setPreviewData(null);
+      setChatPendingSteps(null);
       if (res.cleaned_profile) {
         setReport((prev) => ({
           ...prev,
@@ -346,13 +1185,28 @@ export default function App() {
   const resetAll = () => {
     setReport(null);
     setSuggestions([]);
-    setSelectedIds(new Set());
+    setManualMappings({});
+    setSelectedStructuralIds(new Set());
     setCleaningResult(null);
     setCleaningError(null);
+    setPreviewData(null);
+    setChatPendingSteps(null);
     setError(null);
   };
 
   const displayReport = report;
+
+  // Separate suggestions
+  const categoricalSuggestions = suggestions.filter((s) => s.action === "standardize_category");
+  const structuralSuggestions = suggestions.filter((s) => s.action !== "standardize_category");
+
+  // Calculate count of remapped values
+  const totalRemappedValues = Object.values(manualMappings).reduce((acc, valMap) => {
+    return (
+      acc +
+      Object.entries(valMap).filter(([k, v]) => v && v !== k && v !== "(keep as-is)").length
+    );
+  }, 0);
 
   return (
     <div className="page">
@@ -393,44 +1247,82 @@ export default function App() {
             <ColumnRow column={col} index={idx} key={col.name} />
           ))}
 
-          {/* --- Cleaning suggestions section --- */}
+          {/* --- Cleaning suggestions / manual per-column review section --- */}
           <div className="cleaning-section">
-            <div className="ledger-header">Review suggested fixes</div>
+            <div className="ledger-header">Review & Standardize Values</div>
             {suggestionsLoading ? (
-              <div className="loading-note">Analyzing cleaning rules…</div>
+              <div className="loading-note">Analyzing cleaning rules & category groupings…</div>
             ) : suggestions.length === 0 ? (
               <div className="clean-note">No automated cleaning issues detected. Your data looks good!</div>
             ) : (
-              <div className="suggestions-list smooth-expand">
-                {suggestions.map((s) => {
-                  const isChecked = selectedIds.has(s.id);
-                  return (
-                    <label className="suggestion-row" key={s.id}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleSuggestion(s.id)}
+              <div className="manual-review-scroll-container smooth-expand">
+                <div className="manual-review-body">
+                  {/* Categorical per-column review cards */}
+                  {categoricalSuggestions.map((s) => {
+                    const col = s.params?.column;
+                    return (
+                      <CategoricalReviewCard
+                        key={s.id}
+                        column={col}
+                        distinctValues={s.params?.distinct_values || {}}
+                        variantConfidences={s.params?.variant_confidences || {}}
+                        groups={s.params?.groups || []}
+                        mapping={manualMappings[col] || {}}
+                        totalRows={displayReport.row_count || 0}
+                        onValueChange={handleMappingChange}
                       />
-                      <span className="suggestion-desc">{s.description}</span>
-                      <span className={`severity-badge ${s.severity}`}>{s.severity}</span>
-                    </label>
-                  );
-                })}
+                    );
+                  })}
+
+                  {/* Structural suggestions checklist */}
+                  <StructuralReviewList
+                    suggestions={structuralSuggestions}
+                    selectedIds={selectedStructuralIds}
+                    onToggle={toggleStructuralSuggestion}
+                  />
+                </div>
+
+                {/* Sticky footer at the bottom of the review container */}
+                <div className="manual-review-footer">
+                  <div className="manual-review-summary">
+                    {categoricalSuggestions.length > 0 && (
+                      <span>
+                        {categoricalSuggestions.length} column{categoricalSuggestions.length > 1 ? "s" : ""} (
+                        {totalRemappedValues} value{totalRemappedValues !== 1 ? "s" : ""} remapped)
+                      </span>
+                    )}
+                    {categoricalSuggestions.length > 0 && structuralSuggestions.length > 0 && (
+                      <span> · </span>
+                    )}
+                    {structuralSuggestions.length > 0 && (
+                      <span>{selectedStructuralIds.size} structural fix{selectedStructuralIds.size !== 1 ? "es" : ""} selected</span>
+                    )}
+                  </div>
+
+                  <button
+                    id="apply-all-changes-btn"
+                    className="apply-button"
+                    onClick={handlePreview}
+                    disabled={
+                      previewLoading ||
+                      (totalRemappedValues === 0 && selectedStructuralIds.size === 0)
+                    }
+                  >
+                    {previewLoading ? "Generating preview…" : "Apply all changes"}
+                  </button>
+                </div>
               </div>
             )}
 
             {cleaningError && <div className="error-banner">{cleaningError}</div>}
 
-            {suggestions.length > 0 && !cleaningResult && (
-              <div className="actions-strip">
-                <button
-                  className="apply-button"
-                  onClick={handleApplyCleaning}
-                  disabled={cleaningLoading || selectedIds.size === 0}
-                >
-                  {cleaningLoading ? "Applying cleaning…" : `Apply cleaning (${selectedIds.size} selected)`}
-                </button>
-              </div>
+            {previewData && !cleaningResult && (
+              <PreviewPanel
+                previewData={previewData}
+                onConfirm={handleConfirmApply}
+                onCancel={() => { setPreviewData(null); setChatPendingSteps(null); }}
+                loading={cleaningLoading}
+              />
             )}
           </div>
 
@@ -483,13 +1375,22 @@ export default function App() {
             </div>
           )}
 
+          {/* --- Chart Builder section --- */}
+          <ChartBuilder
+            datasetId={displayReport.dataset_id}
+            columns={displayReport.columns || []}
+          />
+
           <button className="reset-link" onClick={resetAll}>
             ← Profile another file
           </button>
         </div>
       )}
 
-      <ChatBot datasetId={displayReport?.dataset_id} />
+      <ChatBot
+        datasetId={displayReport?.dataset_id}
+        onPreviewChatAction={handleChatPreviewAction}
+      />
     </div>
   );
 }

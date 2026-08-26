@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.ai_suggestions import generate_ai_suggestions
+from app.ai_suggestions import generate_ai_suggestions, ALLOWED_OPERATIONS
 from app.cleaning import apply_pipeline
 from app.database import Base, engine, get_db
 from app.models import Dataset, PipelineStep
@@ -332,16 +332,19 @@ def preview_cleaning_pipeline(
             "before": {"rows": original_row_count},
             "after": {"rows": cleaned_row_count},
             "rows_removed": original_row_count - cleaned_row_count,
+            "summary": f"{original_row_count} → {cleaned_row_count} rows ({original_row_count - cleaned_row_count} removed)",
         })
 
     for col in sorted(affected_columns):
         if col not in cleaned_df.columns:
             # Column was dropped
+            before_vc = before_counts.get(col, {})
             column_diffs.append({
                 "column": col,
-                "before": before_counts.get(col, {}),
+                "before": before_vc,
                 "after": {},
                 "note": "column dropped",
+                "summary": f"Column '{col}' dropped entirely",
             })
             continue
 
@@ -358,10 +361,24 @@ def preview_cleaning_pipeline(
 
         before = before_counts.get(col, {})
         if before != after_vc:  # only include columns that actually changed
+            # Build a human-readable summary of the change
+            before_distinct = len(before)
+            after_distinct = len(after_vc)
+            total_remapped = sum(
+                before.get(k, 0) for k in before if k not in after_vc
+            )
+            parts = []
+            if before_distinct != after_distinct:
+                parts.append(f"{before_distinct} distinct → {after_distinct} distinct values")
+            if total_remapped > 0:
+                parts.append(f"{total_remapped} rows remapped")
+            summary = "; ".join(parts) if parts else "values changed"
+
             column_diffs.append({
                 "column": col,
                 "before": before,
                 "after": after_vc,
+                "summary": summary,
             })
 
     return {
@@ -419,42 +436,321 @@ def download_cleaned_dataset(
     )
 
 
+@app.get("/datasets/{dataset_id}/chart-data")
+def get_chart_data(
+    dataset_id: str,
+    chart_type: str = Query("bar", regex="^(bar|line|scatter|pie)$"),
+    x: str = Query(..., description="Column name for X axis / grouping"),
+    y: str | None = Query(None, description="Column name for Y axis (optional for count-based charts)"),
+    agg: str = Query("count", regex="^(count|sum|mean)$"),
+    use_cleaned: bool = Query(True, description="Prefer cleaned dataset if available"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Return chart-ready aggregated data for the given dataset.
+
+    Never modifies state — read-only endpoint.
+    """
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    # --- Load the appropriate dataframe ---
+    storage = get_storage()
+    df: pd.DataFrame | None = None
+
+    # Try cleaned version first if requested and available
+    if use_cleaned and dataset.cleaned_storage_path:
+        try:
+            csv_bytes = storage.load(dataset.cleaned_storage_path)
+            df = pd.read_csv(io.BytesIO(csv_bytes))
+        except Exception:  # noqa: BLE001
+            df = None  # fall through to raw
+
+    if df is None:
+        # Fall back to raw
+        df = DATASETS.get(dataset_id)
+        if df is None and dataset.raw_storage_path:
+            try:
+                raw_bytes = storage.load(dataset.raw_storage_path)
+                df = _parse_dataframe(dataset.filename, raw_bytes)
+                DATASETS[dataset_id] = df
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=500, detail=f"Could not load dataset: {exc}") from exc
+
+    if df is None:
+        raise HTTPException(status_code=404, detail="Dataset not found in storage.")
+
+    # --- Validate columns ---
+    if x not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{x}' not found. Available: {list(df.columns)}",
+        )
+    if y is not None and y not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{y}' not found. Available: {list(df.columns)}",
+        )
+
+    # --- Aggregate ---
+    MAX_GROUPS = 50
+    try:
+        if agg == "count" or y is None:
+            # Count occurrences of each x value
+            grouped = (
+                df[x]
+                .astype(str)
+                .value_counts()
+                .head(MAX_GROUPS)
+                .reset_index()
+            )
+            grouped.columns = ["label", "value"]
+            y_label = "Count"
+        elif agg == "sum":
+            grouped = (
+                df.groupby(x)[y]
+                .sum()
+                .reset_index()
+                .rename(columns={x: "label", y: "value"})
+                .nlargest(MAX_GROUPS, "value")
+            )
+            y_label = f"Sum of {y}"
+        else:  # mean
+            grouped = (
+                df.groupby(x)[y]
+                .mean()
+                .reset_index()
+                .rename(columns={x: "label", y: "value"})
+                .nlargest(MAX_GROUPS, "value")
+            )
+            y_label = f"Mean of {y}"
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Aggregation failed: {exc}") from exc
+
+    # Convert to JSON-safe types
+    labels = [str(v) for v in grouped["label"].tolist()]
+    values = [
+        round(float(v), 4) if v is not None and str(v) not in ("nan", "None") else 0.0
+        for v in grouped["value"].tolist()
+    ]
+
+    return {
+        "labels": labels,
+        "values": values,
+        "chart_type": chart_type,
+        "x_label": x,
+        "y_label": y_label if (agg != "count" and y) else "Count",
+        "row_count": len(df),
+        "group_count": len(labels),
+    }
+
+
+def _build_chat_context(message: str, dataset_id: str, db: Session) -> str:
+    """Build a context string for the chat prompt.
+
+    If the user's message mentions a specific column name (case-insensitive
+    substring match), enriches the context with up to 100 raw values from
+    that column plus value-counts for values appearing more than once.
+    Otherwise returns a lightweight summary (row count + column names only).
+    """
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        return ""
+
+    profile = dataset.profile_json or {}
+    columns_meta = profile.get("columns", [])
+    col_names = [c["name"] for c in columns_meta]
+    row_count = profile.get("row_count", 0)
+
+    # Lightweight summary — always included
+    base_ctx = (
+        f"The user's dataset has {row_count} rows and these columns: {col_names}. "
+    )
+
+    # Check whether the message mentions any specific column (simple substring check)
+    msg_lower = message.lower()
+    matched_col: str | None = None
+    for col_name in col_names:
+        if col_name.lower() in msg_lower:
+            matched_col = col_name
+            break
+
+    if matched_col is None:
+        return base_ctx  # No column mentioned — keep the lightweight context
+
+    # Load the dataframe to pull real values for the matched column
+    df = DATASETS.get(dataset_id)
+    if df is None and dataset.raw_storage_path:
+        try:
+            storage = get_storage()
+            raw_bytes = storage.load(dataset.raw_storage_path)
+            df = _parse_dataframe(dataset.filename, raw_bytes)
+            DATASETS[dataset_id] = df
+        except Exception:  # noqa: BLE001
+            return base_ctx  # Storage error — fall back to lightweight context
+
+    if df is None or matched_col not in df.columns:
+        return base_ctx
+
+    series = df[matched_col]
+    sample_size = min(100, len(series))
+    raw_values = series.head(sample_size).tolist()
+
+    # Value-counts only for values that appear more than once (de-noises unique IDs)
+    vc = series.value_counts()
+    repeated_vc = {str(k): int(v) for k, v in vc[vc > 1].items()}
+
+    col_ctx = (
+        f"\n\nDetailed data for column '{matched_col}' "
+        f"(first {sample_size} raw values): {raw_values}. "
+    )
+    if repeated_vc:
+        col_ctx += f"Value counts (values appearing more than once): {repeated_vc}. "
+
+    return base_ctx + col_ctx
+
+
 @app.post("/chat")
-def chat_endpoint(req: ChatRequestSchema, db: Session = Depends(get_db)) -> dict[str, str]:
+def chat_endpoint(req: ChatRequestSchema, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from google.genai import types as genai_types
+
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         return {
             "reply": "AI assistant isn't configured — add GEMINI_API_KEY to backend/.env and restart the server."
         }
 
+    # Build context — column-enriched when a column name is mentioned, lightweight otherwise
     context = ""
     if req.dataset_id:
-        dataset = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
-        if dataset and dataset.profile_json and "columns" in dataset.profile_json:
-            cols = [c["name"] for c in dataset.profile_json["columns"]]
-            row_count = dataset.profile_json.get("row_count", 0)
-            context = f"The user's dataset has {row_count} rows and these columns: {cols}. "
-        elif req.dataset_id in DATASETS:
-            df = DATASETS[req.dataset_id]
-            context = f"The user's dataset has {len(df)} rows and these columns: {list(df.columns)}. "
+        context = _build_chat_context(req.message, req.dataset_id, db)
 
     full_prompt = f"{context}User question: {req.message}"
+
     client = genai.Client(api_key=api_key)
-    models_to_try = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
-    reply = None
-    last_error = None
+    models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+
+    # --- Phase 2: define propose_cleaning_action as a Gemini function tool ---
+    allowed_ops_desc = ", ".join(sorted(ALLOWED_OPERATIONS))
+    propose_tool = genai_types.Tool(
+        function_declarations=[
+            genai_types.FunctionDeclaration(
+                name="propose_cleaning_action",
+                description=(
+                    "Propose a single data cleaning action for a specific column. "
+                    "Use this when you identify a concrete, actionable data quality issue "
+                    "that can be fixed with one of the allowed operations. "
+                    "Do NOT call this function for general questions — only when suggesting a fix."
+                ),
+                parameters=genai_types.Schema(
+                    type=genai_types.Type.OBJECT,
+                    properties={
+                        "column": genai_types.Schema(
+                            type=genai_types.Type.STRING,
+                            description="The exact column name to clean.",
+                        ),
+                        "operation": genai_types.Schema(
+                            type=genai_types.Type.STRING,
+                            description=(
+                                f"The cleaning operation to apply. "
+                                f"Must be exactly one of: {allowed_ops_desc}."
+                            ),
+                        ),
+                        "reasoning": genai_types.Schema(
+                            type=genai_types.Type.STRING,
+                            description="A concise explanation of why this fix is needed, referencing actual values where possible.",
+                        ),
+                    },
+                    required=["column", "operation", "reasoning"],
+                ),
+            )
+        ]
+    )
+
+    reply: str | None = None
+    proposed_action: dict[str, Any] | None = None
+    last_error: Exception | None = None
+
     for model_name in models_to_try:
         try:
             response = client.models.generate_content(
                 model=model_name,
                 contents=full_prompt,
+                config=genai_types.GenerateContentConfig(
+                    tools=[propose_tool],
+                ),
             )
-            reply = response.text
-            break
+
+            # Inspect parts: collect function call (if any) and text parts separately
+            fn_call = None
+            text_parts: list[str] = []
+            for candidate in (response.candidates or []):
+                content = candidate.content
+                if not content:
+                    continue
+                for part in (content.parts or []):
+                    if hasattr(part, "function_call") and part.function_call is not None:
+                        fn_call = part.function_call
+                    elif hasattr(part, "text") and part.text:
+                        text_parts.append(part.text)
+
+            if fn_call is not None and fn_call.name == "propose_cleaning_action":
+                args = dict(fn_call.args or {})
+                col = str(args.get("column", "")).strip()
+                op = str(args.get("operation", "")).strip()
+                reasoning = str(args.get("reasoning", "")).strip()
+
+                # Validate: operation must be in allowed list; column must exist in dataset
+                col_names_for_validation: list[str] = []
+                if req.dataset_id:
+                    ds = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+                    if ds and ds.profile_json:
+                        col_names_for_validation = [
+                            c["name"] for c in ds.profile_json.get("columns", [])
+                        ]
+
+                op_valid = op in ALLOWED_OPERATIONS
+                col_valid = op == "drop_duplicates" or col in col_names_for_validation
+
+                if op_valid and col_valid:
+                    proposed_action = {
+                        "column": col,
+                        "operation": op,
+                        "reasoning": reasoning,
+                        "severity": "medium",
+                    }
+                    # Use any accompanying text; fall back to a summary sentence
+                    reply = (
+                        " ".join(text_parts).strip()
+                        or f"I suggest applying '{op}' to column '{col}': {reasoning}"
+                    )
+                else:
+                    # Validation failed — surface the text parts if any, else generic message
+                    reply = (
+                        " ".join(text_parts).strip()
+                        or "I identified a potential issue but couldn't map it to a valid operation. "
+                           "Please check the column name or rephrase your question."
+                    )
+            else:
+                # Plain text response (no function call)
+                reply = " ".join(text_parts).strip() if text_parts else None
+                if reply is None:
+                    try:
+                        reply = response.text  # SDK convenience accessor
+                    except Exception:  # noqa: BLE001
+                        reply = None
+
+            if reply is not None:
+                break
+
         except Exception as e:  # noqa: BLE001
             last_error = e
             continue
 
     if reply is None:
         return {"reply": f"Couldn't reach Gemini — {str(last_error)}"}
-    return {"reply": reply}
+
+    result: dict[str, Any] = {"reply": reply}
+    if proposed_action is not None:
+        result["proposed_action"] = proposed_action
+    return result

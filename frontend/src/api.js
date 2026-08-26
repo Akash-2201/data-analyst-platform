@@ -56,6 +56,21 @@ export async function applyPipeline(datasetId) {
   return res.json();
 }
 
+export async function previewPipeline(datasetId, steps) {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(steps),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Failed to preview pipeline (${res.status})`);
+  }
+
+  return res.json();
+}
+
 export async function getPipeline(datasetId) {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/pipeline`);
 
@@ -121,4 +136,15 @@ export async function sendChatMessage(message, datasetId = null) {
   return res.json();
 }
 
+export async function getChartData(datasetId, { chartType, x, y, agg, useCleaned }) {
+  const params = new URLSearchParams({ chart_type: chartType, x, agg });
+  if (y) params.append("y", y);
+  if (useCleaned !== undefined) params.append("use_cleaned", String(useCleaned));
 
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/chart-data?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Chart data failed (${res.status})`);
+  }
+  return res.json();
+}
