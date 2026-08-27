@@ -16,6 +16,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
+import numpy as np
 import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +84,7 @@ class StepSchema(BaseModel):
 class ChatRequestSchema(BaseModel):
     message: str
     dataset_id: str | None = None
+    chart_context: dict[str, Any] | None = None
 
 
 @app.get("/health")
@@ -439,7 +441,7 @@ def download_cleaned_dataset(
 @app.get("/datasets/{dataset_id}/chart-data")
 def get_chart_data(
     dataset_id: str,
-    chart_type: str = Query("bar", regex="^(bar|line|scatter|pie)$"),
+    chart_type: str = Query("bar", regex="^(bar|line|scatter|pie|histogram|box_plot|stacked_bar)$"),
     x: str = Query(..., description="Column name for X axis / grouping"),
     y: str | None = Query(None, description="Column name for Y axis (optional for count-based charts)"),
     agg: str = Query("count", regex="^(count|sum|mean)$"),
@@ -494,6 +496,75 @@ def get_chart_data(
 
     # --- Aggregate ---
     MAX_GROUPS = 50
+
+    # -----------------------------------------------------------------------
+    # New chart types — early return before the existing bar/line/scatter/pie
+    # aggregation block below.
+    # -----------------------------------------------------------------------
+    if chart_type == "histogram":
+        col_data = pd.to_numeric(df[x], errors="coerce").dropna()
+        if col_data.empty:
+            raise HTTPException(status_code=400, detail=f"Column '{x}' has no numeric values for histogram.")
+        num_bins = min(20, max(5, int(col_data.nunique())))
+        counts, bin_edges = np.histogram(col_data, bins=num_bins)
+        labels = [f"{bin_edges[i]:.3g}\u2013{bin_edges[i+1]:.3g}" for i in range(len(counts))]
+        values = [int(c) for c in counts]
+        return {
+            "labels": labels, "values": values, "chart_type": chart_type,
+            "x_label": x, "y_label": "Count",
+            "row_count": len(df), "group_count": len(labels),
+        }
+
+    if chart_type == "box_plot":
+        col_data = pd.to_numeric(df[x], errors="coerce").dropna()
+        if col_data.empty:
+            raise HTTPException(status_code=400, detail=f"Column '{x}' has no numeric values for box plot.")
+        if y and y in df.columns:
+            groups_unique = df[y].dropna().astype(str).unique()[:MAX_GROUPS]
+            labels_bp: list[str] = [str(g) for g in groups_unique]
+            box_stats: list[dict] = []
+            for g in groups_unique:
+                mask = df[y].astype(str) == str(g)
+                col_g = pd.to_numeric(df.loc[mask, x], errors="coerce").dropna()
+                if col_g.empty:
+                    continue
+                q1, med, q3 = float(col_g.quantile(0.25)), float(col_g.quantile(0.5)), float(col_g.quantile(0.75))
+                box_stats.append({"min": float(col_g.min()), "q1": q1, "median": med, "q3": q3, "max": float(col_g.max()), "iqr": round(q3 - q1, 4)})
+        else:
+            q1, med, q3 = float(col_data.quantile(0.25)), float(col_data.quantile(0.5)), float(col_data.quantile(0.75))
+            labels_bp = [x]
+            box_stats = [{"min": float(col_data.min()), "q1": q1, "median": med, "q3": q3, "max": float(col_data.max()), "iqr": round(q3 - q1, 4)}]
+        return {
+            "labels": labels_bp, "box_stats": box_stats,
+            "values": [s["median"] for s in box_stats],
+            "chart_type": chart_type,
+            "x_label": (y if (y and y in df.columns) else x), "y_label": x,
+            "row_count": len(df), "group_count": len(labels_bp),
+        }
+
+    if chart_type == "stacked_bar":
+        if not y or y not in df.columns:
+            raise HTTPException(status_code=400, detail="stacked_bar requires a 'y' column for the stack dimension.")
+        try:
+            x_str = df[x].astype(str)
+            y_str = df[y].astype(str)
+            grouped_df = pd.DataFrame({"_x": x_str, "_y": y_str}).groupby(["_x", "_y"]).size().reset_index(name="count")
+            x_vals = grouped_df["_x"].unique()[:MAX_GROUPS]
+            y_vals = grouped_df["_y"].unique()[:MAX_GROUPS]
+            series: list[dict] = []
+            for y_val in y_vals:
+                sub = grouped_df[grouped_df["_y"] == y_val].set_index("_x")["count"]
+                data_points = [int(sub.get(str(xv), 0)) for xv in x_vals]
+                series.append({"name": str(y_val), "data": data_points})
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Stacked bar failed: {exc}") from exc
+        return {
+            "labels": [str(v) for v in x_vals], "series": series, "values": [],
+            "chart_type": chart_type, "x_label": x, "y_label": y,
+            "row_count": len(df), "group_count": len(x_vals),
+        }
+
+    # --- Existing aggregation for bar / line / scatter / pie ---
     try:
         if agg == "count" or y is None:
             # Count occurrences of each x value
@@ -569,6 +640,22 @@ def _build_chat_context(message: str, dataset_id: str, db: Session) -> str:
 
     # Check whether the message mentions any specific column (simple substring check)
     msg_lower = message.lower()
+
+    # Visualization awareness: when user asks about charts/trends include chartable column info
+    _VIZ_KW = ("chart", "graph", "plot", "trend", "distribution", "histogram",
+               "average", "highest", "lowest", "visualiz", "compare", "which")
+    if any(kw in msg_lower for kw in _VIZ_KW):
+        chartable: list[str] = []
+        for c in columns_meta:
+            it = c.get("inferred_type", "")
+            nm = c.get("name", "")
+            uc = c.get("unique_count", 0)
+            if it in ("numeric", "non_negative_numeric"):
+                chartable.append(f"'{nm}' (numeric) \u2192 histogram/scatter/box plot")
+            elif it == "categorical" and uc <= 50:
+                chartable.append(f"'{nm}' (categorical, {uc} values) \u2192 bar/pie/stacked bar")
+        if chartable:
+            base_ctx += f"Chartable columns: {'; '.join(chartable)}. "
     matched_col: str | None = None
     for col_name in col_names:
         if col_name.lower() in msg_lower:
@@ -624,6 +711,34 @@ def chat_endpoint(req: ChatRequestSchema, db: Session = Depends(get_db)) -> dict
     context = ""
     if req.dataset_id:
         context = _build_chat_context(req.message, req.dataset_id, db)
+
+    # Append chart context when the frontend provides it
+    if req.chart_context:
+        cc = req.chart_context
+        ct_name = cc.get("chartType", cc.get("chart_type", ""))
+        cx_name = cc.get("x", "")
+        cy_name = cc.get("y", "")
+        c_labels = cc.get("labels", []) or []
+        c_values = cc.get("values", []) or []
+        c_box = cc.get("box_stats", []) or []
+        c_series = cc.get("series", []) or []
+        chart_summary = f"\n\nCurrently displayed chart: {ct_name} of '{cx_name}'"
+        if cy_name:
+            chart_summary += f" grouped by '{cy_name}'"
+        chart_summary += "."
+        if c_labels and c_values:
+            pairs = [(str(l), v) for l, v in zip(c_labels, c_values) if isinstance(v, (int, float))]
+            pairs.sort(key=lambda p: p[1], reverse=True)
+            chart_summary += " Data (top values): " + ", ".join(f"{l}={v:g}" for l, v in pairs[:10]) + "."
+        elif c_box:
+            stats_strs = [
+                f"{c_labels[i] if i < len(c_labels) else i}: min={s['min']:.3g} q1={s['q1']:.3g} median={s['median']:.3g} q3={s['q3']:.3g} max={s['max']:.3g}"
+                for i, s in enumerate(c_box[:6])
+            ]
+            chart_summary += f" Box plot stats: {'; '.join(stats_strs)}."
+        elif c_series:
+            chart_summary += " Stacked series: " + ", ".join(s["name"] for s in c_series[:6]) + "."
+        context += chart_summary
 
     full_prompt = f"{context}User question: {req.message}"
 

@@ -1,0 +1,10 @@
+Name,Age,Gender,City,Department,Salary
+Alice,28,MALE,Bengaluru,Marketing,72000
+Bob,35,male,bangalore,Marekting,58000
+Charlie,42,M,BANGALORE,Marketing,95000
+Diana,-5,FEMALE,Bengaluru,marketing,61000
+Eve,31,female,Banglore,Engineering,88000
+Frank,55,F,bengaluru,engineering,  120000  
+Grace,29,MALE,BENGALURU,Marketing,45000
+Heidi,33,male,bangalore,Marekting,79000
+Ivan,26,FEMALE,Bengaluru,HR,42000

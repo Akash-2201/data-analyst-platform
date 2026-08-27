@@ -563,13 +563,6 @@ def generate_ai_suggestions(
 ) -> dict[str, Any]:
     """
     Generate AI-powered cleaning suggestions.
-
-    Returns:
-        {
-          "suggestions": list[dict],   # flat list with id/action/params/description/severity/recommended
-          "general_notes": list[str],  # dataset-level observations
-          "source": "ai" | "rule_based_fallback",
-        }
     """
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -587,24 +580,53 @@ def generate_ai_suggestions(
         client = genai.Client(api_key=api_key)
         models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
 
+        # ------------------------------------------------------------------
+        # Phase 0: Deterministic per-column categorical grouping.
+        # Call _ai_semantic_grouping for EVERY categorical/text column
+        # unconditionally. Pre-populate mapping_cache so _validate_and_enrich
+        # reuses these results without making a second AI call, and so Phase 2
+        # can inject suggestions for columns Gemini's main prompt skips.
+        # ------------------------------------------------------------------
+        _CATEGORICAL_INFERRED_TYPES = {"categorical", "text", "string", "object"}
+
+        mapping_cache: dict[str, dict] = {}
+        for col_meta in profile.get("columns", []):
+            inferred = (col_meta.get("inferred_type") or "").lower()
+            col_name = col_meta.get("name", "")
+            if inferred in _CATEGORICAL_INFERRED_TYPES and col_name in df.columns:
+                mapping, rec, warn, extra = _fill_standardize_mapping_ai(
+                    df, col_name, client, models_to_try
+                )
+                # Always store in cache — even when empty — to prevent a
+                # redundant AI call inside _validate_and_enrich later.
+                mapping_cache[col_name] = {
+                    "mapping": mapping,
+                    "recommended": rec,
+                    "warn_desc": warn,
+                    "extra_info": extra,
+                }
+                logger.info(
+                    "Phase-0 grouping for %r: %d group(s), %d high-conf mappings",
+                    col_name,
+                    len(extra.get("groups", [])),
+                    len(mapping),
+                )
+
         summary = _build_compact_summary(profile)
         prompt = _build_prompt(summary)
 
         raw_text: str | None = None
         last_error: Exception | None = None
-
         for model_name in models_to_try:
             try:
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=genai_types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
+                    config=genai_types.GenerateContentConfig(response_mime_type="application/json"),
                 )
                 raw_text = response.text
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = exc
                 logger.warning("Model %s failed: %s", model_name, exc)
                 continue
@@ -615,15 +637,45 @@ def generate_ai_suggestions(
         parsed: dict[str, Any] = json.loads(raw_text)
         raw_suggestions: list[dict] = parsed.get("suggestions", [])
         general_notes: list[str] = [str(n) for n in parsed.get("general_notes", []) if n]
-
-        mapping_cache: dict[str, dict] = {}
         validated: list[dict[str, Any]] = []
         for raw_sug in raw_suggestions:
             result = _validate_and_enrich(raw_sug, df, mapping_cache, client, models_to_try)
             if result is not None:
                 validated.append(result)
 
-        # Safety net: ensure drop_duplicates is present if profile says duplicates exist
+        # ------------------------------------------------------------------
+        # Phase 2: Inject standardize_category for any categorical column
+        # that has grouping results but was missed by Gemini's main prompt.
+        # ------------------------------------------------------------------
+        already_covered: set[str] = {
+            s["params"]["column"]
+            for s in validated
+            if s["action"] == "standardize_category" and "column" in (s.get("params") or {})
+        }
+        for col_name, data in mapping_cache.items():
+            if col_name in already_covered:
+                continue
+            extra_info = data.get("extra_info", {})
+            if not data.get("mapping") and not extra_info.get("groups"):
+                # No groupings found — nothing to surface
+                continue
+            validated.append({
+                "id": str(uuid.uuid4()),
+                "action": "standardize_category",
+                "params": {
+                    "column": col_name,
+                    "mapping": data["mapping"],
+                    "distinct_values": extra_info.get("distinct_values", {}),
+                    "variant_confidences": extra_info.get("variant_confidences", {}),
+                    "groups": extra_info.get("groups", []),
+                },
+                "description": f"Standardize categories in '{col_name}' (exhaustive scan)",
+                "severity": "medium",
+                "ai_reason": "Deterministic per-column scan found variant groupings not flagged by main prompt.",
+                "recommended": data.get("recommended", True),
+            })
+            logger.info("Phase-2 injected standardize_category for %r", col_name)
+
         dup_rows = profile.get("duplicate_row_count", 0)
         if dup_rows > 0 and not any(v["action"] == "drop_duplicates" for v in validated):
             validated.insert(0, {

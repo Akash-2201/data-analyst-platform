@@ -35,7 +35,7 @@ function proposedActionToStep(proposed_action) {
   };
 }
 
-function ChatBot({ datasetId, onPreviewChatAction }) {
+function ChatBot({ datasetId, onPreviewChatAction, chartContext }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     { sender: "assistant", text: "Ask me anything about your data" },
@@ -63,7 +63,7 @@ function ChatBot({ datasetId, onPreviewChatAction }) {
     setLoading(true);
 
     try {
-      const res = await sendChatMessage(userText, datasetId);
+      const res = await sendChatMessage(userText, datasetId, chartContext || null);
       const newMsgIdx = messages.length + 1; // +1 for user msg just added
       setMessages((prev) => [
         ...prev,
@@ -265,13 +265,18 @@ function Dropzone({ onFile, disabled }) {
 function QualityBars({ column }) {
   const [mounted, setMounted] = useState(false);
 
+  // Reset animation whenever the column name changes (new dataset uploaded).
+  // This allows the CSS transition to re-run from 0% each time.
   useEffect(() => {
+    setMounted(false);
     const timer = setTimeout(() => setMounted(true), 50);
     return () => clearTimeout(timer);
-  }, []);
+  }, [column.name]); // ← dep on column.name, not [] — fixes stale animation on re-upload
 
-  const missingPct = Math.max(column.missing_pct, column.missing_pct > 0 ? 4 : 0);
-  const uniquePct = column.unique_pct;
+  // Clamp to [0, 100] to guard against NaN or floating-point drift exceeding 100%
+  const missingPct = Math.min(100, Math.max(0, column.missing_pct || 0));
+  const missingDisplay = Math.max(missingPct, missingPct > 0 ? 4 : 0); // min visible width
+  const uniquePct = Math.min(100, Math.max(0, column.unique_pct || 0));
 
   return (
     <div className="quality-cell">
@@ -280,7 +285,7 @@ function QualityBars({ column }) {
         <div className="bar-track">
           <div
             className={`bar-fill${column.missing_pct > 0 ? " flagged" : ""}`}
-            style={{ width: mounted ? `${missingPct}%` : "0%" }}
+            style={{ width: mounted ? `${missingDisplay}%` : "0%" }}
           />
         </div>
         <span className="bar-value">{column.missing_pct}%</span>
@@ -339,57 +344,67 @@ const CHART_COLORS = [
 // ---------------------------------------------------------------------------
 // ChartBuilder — interactive chart section rendered below the profiling report
 // ---------------------------------------------------------------------------
-function ChartBuilder({ datasetId, columns }) {
+function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
   const allCols = columns || [];
-  // Heuristic column classification for smart defaults
   const catCols = allCols.filter(
     (c) => c.inferred_type === "categorical" || c.dtype === "object"
   );
   const numCols = allCols.filter(
     (c) =>
       c.inferred_type === "numeric" ||
+      c.inferred_type === "non_negative_numeric" ||
       ["int64", "float64", "int32", "float32", "int16", "float16"].includes(c.dtype)
   );
 
   const defaultX = (catCols[0] || allCols[0])?.name || "";
+  const defaultNumX = numCols[0]?.name || "";
   const defaultY = numCols[0]?.name || "";
+  const defaultStack = (catCols[1] || catCols[0])?.name || "";
 
   const [chartType, setChartType] = useState("bar");
   const [xCol, setXCol] = useState(defaultX);
   const [yCol, setYCol] = useState(defaultY);
+  const [stackCol, setStackCol] = useState(defaultStack);
   const [agg, setAgg] = useState("count");
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Y axis is required for line, scatter, and bar with sum/mean
   const needsY =
     chartType === "line" ||
     chartType === "scatter" ||
     (chartType === "bar" && agg !== "count");
+  const needsStack = chartType === "stacked_bar";
+  const isHistOrBox = chartType === "histogram" || chartType === "box_plot";
 
   const doFetch = async (overrides = {}) => {
     const ct = overrides.chartType ?? chartType;
     const xc = overrides.xCol ?? xCol;
     const yc = overrides.yCol ?? yCol;
+    const sc = overrides.stackCol ?? stackCol;
     const ag = overrides.agg ?? agg;
-    const ny =
-      ct === "line" ||
-      ct === "scatter" ||
-      (ct === "bar" && ag !== "count");
+
     if (!datasetId || !xc) return;
-    if (ny && !yc) return;
+    const needsYNow = ct === "line" || ct === "scatter" || (ct === "bar" && ag !== "count");
+    if (needsYNow && !yc) return;
+    if (ct === "stacked_bar" && !sc) return;
+
     setLoading(true);
     setError(null);
     try {
+      let fetchY;
+      if (ct === "stacked_bar") fetchY = sc;
+      else if (needsYNow) fetchY = yc;
+      else if (ct === "box_plot" && yc) fetchY = yc; // optional grouping
+      else fetchY = undefined;
+
       const data = await getChartData(datasetId, {
-        chartType: ct,
-        x: xc,
-        y: ny ? yc : undefined,
-        agg: ag,
-        useCleaned: true,
+        chartType: ct, x: xc, y: fetchY, agg: ag, useCleaned: true,
       });
       setChartData(data);
+      if (onChartDataFetched) {
+        onChartDataFetched({ chartType: ct, x: xc, y: fetchY, agg: ag, ...data });
+      }
     } catch (err) {
       setError(err.message);
       setChartData(null);
@@ -405,48 +420,168 @@ function ChartBuilder({ datasetId, columns }) {
   const handleChartTypeChange = (e) => {
     const newType = e.target.value;
     setChartType(newType);
-    // Ensure we have a Y col when switching to a chart that needs it
+    if ((newType === "histogram" || newType === "box_plot") && defaultNumX) {
+      if (!numCols.find((c) => c.name === xCol)) setXCol(defaultNumX);
+    }
+    if (newType === "stacked_bar") {
+      if (catCols.length > 0 && !catCols.find((c) => c.name === xCol))
+        setXCol(catCols[0]?.name || xCol);
+      setStackCol(catCols[1]?.name || catCols[0]?.name || "");
+    }
     if ((newType === "line" || newType === "scatter") && !yCol && defaultY) {
       setYCol(defaultY);
     }
   };
 
   // ---------------------------------------------------------------------------
-  // Render helpers per chart type
+  // Renderers
   // ---------------------------------------------------------------------------
+  const renderHistogram = () => {
+    if (!chartData) return null;
+    const { labels, values, x_label } = chartData;
+    const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }} barCategoryGap={1}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
+          <Bar dataKey="value" name={x_label} fill="#1c6e8c" radius={[2, 2, 0, 0]} maxBarSize={60} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
+  const renderStackedBar = () => {
+    if (!chartData || !chartData.series) return null;
+    const { labels, series } = chartData;
+    const data = labels.map((label, i) => {
+      const row = { label: String(label) };
+      series.forEach((s) => { row[s.name] = s.data[i] ?? 0; });
+      return row;
+    });
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {series.map((s, i) => (
+            <Bar
+              key={s.name}
+              dataKey={s.name}
+              stackId="a"
+              fill={CHART_COLORS[i % CHART_COLORS.length]}
+              radius={i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
+  const renderBoxPlot = () => {
+    if (!chartData || !chartData.box_stats) return null;
+    const { labels, box_stats, y_label } = chartData;
+
+    const allVals = box_stats.flatMap((s) => [s.min, s.max]);
+    const gMin = Math.min(...allVals);
+    const gMax = Math.max(...allVals);
+    const range = gMax - gMin || 1;
+
+    const PAD_TOP = 20, PAD_BOT = 52, PAD_LEFT = 62, PAD_RIGHT = 20;
+    const CHART_H = 320;
+    const N = labels.length;
+    const COL_W = Math.max(80, Math.min(160, Math.floor(540 / Math.max(N, 1))));
+    const CHART_W = PAD_LEFT + N * COL_W + PAD_RIGHT;
+    const PLOT_H = CHART_H - PAD_TOP - PAD_BOT;
+    const BOX_HALF = Math.min(22, COL_W * 0.28);
+    // In SVG, Y increases downward. Higher values appear at smaller Y coords.
+    const toY = (v) => PAD_TOP + PLOT_H * (1 - (v - gMin) / range);
+    const ticks = 5;
+    const yTicks = Array.from({ length: ticks + 1 }, (_, i) => gMin + (range * i) / ticks);
+    const fmtNum = (v) => {
+      if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+      if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
+      return v % 1 === 0 ? String(v) : v.toFixed(1);
+    };
+
+    return (
+      <div style={{ overflowX: "auto", padding: "8px 0" }}>
+        <svg width={CHART_W} height={CHART_H} style={{ display: "block", minWidth: "100%" }}>
+          {/* Gridlines */}
+          {yTicks.map((tick, i) => (
+            <line key={i} x1={PAD_LEFT} y1={toY(tick)} x2={CHART_W - PAD_RIGHT} y2={toY(tick)} stroke="#f0eeea" strokeWidth={1} />
+          ))}
+          {/* Y axis */}
+          <line x1={PAD_LEFT} y1={PAD_TOP} x2={PAD_LEFT} y2={PAD_TOP + PLOT_H} stroke="#ccc" strokeWidth={1} />
+          {yTicks.map((tick, i) => (
+            <g key={i}>
+              <line x1={PAD_LEFT - 4} y1={toY(tick)} x2={PAD_LEFT} y2={toY(tick)} stroke="#aaa" strokeWidth={1} />
+              <text x={PAD_LEFT - 8} y={toY(tick)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#888">{fmtNum(tick)}</text>
+            </g>
+          ))}
+          <text x={14} y={PAD_TOP + PLOT_H / 2} textAnchor="middle" fontSize={11} fill="#888"
+            transform={`rotate(-90, 14, ${PAD_TOP + PLOT_H / 2})`}>{y_label}</text>
+
+          {box_stats.map((stat, i) => {
+            const cx = PAD_LEFT + (i + 0.5) * COL_W;
+            const yQ1 = toY(stat.q1);   // lower on screen (larger Y)
+            const yQ3 = toY(stat.q3);   // higher on screen (smaller Y)
+            const yMed = toY(stat.median);
+            const yMin = toY(stat.min);  // lowest on screen
+            const yMax = toY(stat.max);  // highest on screen
+            const capW = BOX_HALF * 0.6;
+            const label = String(labels[i]);
+
+            return (
+              <g key={i}>
+                {/* Upper whisker: from top of box (yQ3) to max (yMax, smaller Y) */}
+                <line x1={cx} y1={yQ3} x2={cx} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
+                <line x1={cx - capW} y1={yMax} x2={cx + capW} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
+                {/* Lower whisker: from bottom of box (yQ1) to min (yMin, larger Y) */}
+                <line x1={cx} y1={yQ1} x2={cx} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
+                <line x1={cx - capW} y1={yMin} x2={cx + capW} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
+                {/* IQR box: yQ3 is top edge, height = yQ1 - yQ3 (positive since yQ1 > yQ3) */}
+                <rect x={cx - BOX_HALF} y={yQ3} width={BOX_HALF * 2} height={Math.max(1, yQ1 - yQ3)}
+                  fill="rgba(28,110,140,0.13)" stroke="#1c6e8c" strokeWidth={1.5} rx={2} />
+                {/* Median */}
+                <line x1={cx - BOX_HALF} y1={yMed} x2={cx + BOX_HALF} y2={yMed} stroke="#1c6e8c" strokeWidth={2.5} />
+                {/* Median label */}
+                <text x={cx + BOX_HALF + 4} y={yMed} dominantBaseline="middle" fontSize={9} fill="#1c6e8c">{fmtNum(stat.median)}</text>
+                {/* X label */}
+                <text x={cx} y={PAD_TOP + PLOT_H + 18} textAnchor="middle" fontSize={11} fill="#666">
+                  {label.length > 13 ? `${label.slice(0, 12)}…` : label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
   const renderChartInner = () => {
     if (!chartData) return null;
+    if (chartType === "histogram") return renderHistogram();
+    if (chartType === "stacked_bar") return renderStackedBar();
+    if (chartType === "box_plot") return renderBoxPlot();
+
     const { labels, values, x_label, y_label } = chartData;
 
     if (chartType === "pie") {
-      // Limit to top 10 slices for legibility
-      const slices = labels.slice(0, 10).map((l, i) => ({
-        name: String(l),
-        value: values[i] ?? 0,
-      }));
+      const slices = labels.slice(0, 10).map((l, i) => ({ name: String(l), value: values[i] ?? 0 }));
       return (
         <ResponsiveContainer width="100%" height={340}>
           <PieChart>
-            <Pie
-              data={slices}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              outerRadius={120}
-              label={({ name, percent }) =>
-                `${name} (${(percent * 100).toFixed(1)}%)`
-              }
-              labelLine={false}
-            >
-              {slices.map((_, i) => (
-                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-              ))}
+            <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120}
+              label={({ name, percent }) => `${name} (${(percent * 100).toFixed(1)}%)`} labelLine={false}>
+              {slices.map((_, i) => (<Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />))}
             </Pie>
-            <Tooltip
-              formatter={(v) => [v.toLocaleString(), "Count"]}
-              contentStyle={{ fontSize: 12, borderRadius: 4 }}
-            />
+            <Tooltip formatter={(v) => [v.toLocaleString(), "Count"]} contentStyle={{ fontSize: 12, borderRadius: 4 }} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
           </PieChart>
         </ResponsiveContainer>
@@ -460,25 +595,10 @@ function ChartBuilder({ datasetId, columns }) {
         <ResponsiveContainer width="100%" height={340}>
           <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 11, fill: "var(--ink-soft)" }}
-              angle={-38}
-              textAnchor="end"
-              interval={0}
-            />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
             <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-            <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 4 }}
-              formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]}
-            />
-            <Bar
-              dataKey="value"
-              name={y_label}
-              fill="#1c6e8c"
-              radius={[3, 3, 0, 0]}
-              maxBarSize={48}
-            />
+            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
+            <Bar dataKey="value" name={y_label} fill="#1c6e8c" radius={[3, 3, 0, 0]} maxBarSize={48} />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -489,72 +609,31 @@ function ChartBuilder({ datasetId, columns }) {
         <ResponsiveContainer width="100%" height={340}>
           <LineChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 11, fill: "var(--ink-soft)" }}
-              angle={-38}
-              textAnchor="end"
-              interval={0}
-            />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
             <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-            <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 4 }}
-              formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]}
-            />
+            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Line
-              type="monotone"
-              dataKey="value"
-              name={y_label}
-              stroke="#1c6e8c"
-              strokeWidth={2.5}
-              dot={{ r: 3, fill: "#1c6e8c" }}
-              activeDot={{ r: 5 }}
-            />
+            <Line type="monotone" dataKey="value" name={y_label} stroke="#1c6e8c" strokeWidth={2.5} dot={{ r: 3, fill: "#1c6e8c" }} activeDot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
       );
     }
 
     if (chartType === "scatter") {
-      // Map category labels to an index on X axis for scatter positioning
-      const scatterData = labels.map((l, i) => ({
-        x: i,
-        y: values[i] ?? 0,
-        label: String(l),
-      }));
+      const scatterData = labels.map((l, i) => ({ x: i, y: values[i] ?? 0, label: String(l) }));
       return (
         <ResponsiveContainer width="100%" height={340}>
           <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-            <XAxis
-              dataKey="x"
-              type="number"
-              name={x_label}
-              tick={{ fontSize: 11 }}
-              tickFormatter={(v) => String(labels[v] ?? v).slice(0, 12)}
-            />
+            <XAxis dataKey="x" type="number" name={x_label} tick={{ fontSize: 11 }} tickFormatter={(v) => String(labels[v] ?? v).slice(0, 12)} />
             <YAxis dataKey="y" type="number" name={y_label} tick={{ fontSize: 11 }} />
-            <Tooltip
-              cursor={{ strokeDasharray: "3 3" }}
-              content={({ payload }) => {
-                if (!payload?.length) return null;
-                const pt = payload[0]?.payload;
-                if (!pt) return null;
-                return (
-                  <div className="chart-scatter-tooltip">
-                    <div className="chart-scatter-tooltip-label">{pt.label}</div>
-                    <div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div>
-                  </div>
-                );
-              }}
-            />
-            <Scatter
-              name={y_label}
-              data={scatterData}
-              fill="#1c6e8c"
-              opacity={0.8}
-            />
+            <Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ payload }) => {
+              if (!payload?.length) return null;
+              const pt = payload[0]?.payload;
+              if (!pt) return null;
+              return (<div className="chart-scatter-tooltip"><div className="chart-scatter-tooltip-label">{pt.label}</div><div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div></div>);
+            }} />
+            <Scatter name={y_label} data={scatterData} fill="#1c6e8c" opacity={0.8} />
           </ScatterChart>
         </ResponsiveContainer>
       );
@@ -570,28 +649,23 @@ function ChartBuilder({ datasetId, columns }) {
       <div className="chart-controls">
         <div className="chart-control-group">
           <label className="chart-label" htmlFor="chart-type-select">Chart type</label>
-          <select
-            id="chart-type-select"
-            className="chart-select"
-            value={chartType}
-            onChange={handleChartTypeChange}
-          >
+          <select id="chart-type-select" className="chart-select" value={chartType} onChange={handleChartTypeChange}>
             <option value="bar">Bar</option>
             <option value="line">Line</option>
             <option value="scatter">Scatter</option>
             <option value="pie">Pie</option>
+            <option value="histogram">Histogram</option>
+            <option value="stacked_bar">Stacked Bar</option>
+            <option value="box_plot">Box Plot</option>
           </select>
         </div>
 
         <div className="chart-control-group">
-          <label className="chart-label" htmlFor="chart-x-select">X axis</label>
-          <select
-            id="chart-x-select"
-            className="chart-select"
-            value={xCol}
-            onChange={(e) => setXCol(e.target.value)}
-          >
-            {allCols.map((c) => (
+          <label className="chart-label" htmlFor="chart-x-select">
+            {isHistOrBox ? "Numeric column" : "X axis"}
+          </label>
+          <select id="chart-x-select" className="chart-select" value={xCol} onChange={(e) => setXCol(e.target.value)}>
+            {(isHistOrBox ? (numCols.length > 0 ? numCols : allCols) : allCols).map((c) => (
               <option key={c.name} value={c.name}>{c.name}</option>
             ))}
           </select>
@@ -600,12 +674,7 @@ function ChartBuilder({ datasetId, columns }) {
         {needsY && (
           <div className="chart-control-group">
             <label className="chart-label" htmlFor="chart-y-select">Y axis</label>
-            <select
-              id="chart-y-select"
-              className="chart-select"
-              value={yCol}
-              onChange={(e) => setYCol(e.target.value)}
-            >
+            <select id="chart-y-select" className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
               {(numCols.length > 0 ? numCols : allCols).map((c) => (
                 <option key={c.name} value={c.name}>{c.name}</option>
               ))}
@@ -613,27 +682,42 @@ function ChartBuilder({ datasetId, columns }) {
           </div>
         )}
 
-        <div className="chart-control-group">
-          <label className="chart-label" htmlFor="chart-agg-select">Aggregation</label>
-          <select
-            id="chart-agg-select"
-            className="chart-select"
-            value={agg}
-            onChange={(e) => setAgg(e.target.value)}
-            disabled={chartType === "scatter" || chartType === "pie"}
-          >
-            <option value="count">Count</option>
-            <option value="sum">Sum</option>
-            <option value="mean">Mean</option>
-          </select>
-        </div>
+        {needsStack && (
+          <div className="chart-control-group">
+            <label className="chart-label" htmlFor="chart-stack-select">Stack by</label>
+            <select id="chart-stack-select" className="chart-select" value={stackCol} onChange={(e) => setStackCol(e.target.value)}>
+              {(catCols.length > 0 ? catCols : allCols).map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        <button
-          id="chart-generate-btn"
-          className="apply-button chart-go-btn"
+        {chartType === "box_plot" && catCols.length > 0 && (
+          <div className="chart-control-group">
+            <label className="chart-label" htmlFor="chart-group-select">Group by (optional)</label>
+            <select id="chart-group-select" className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
+              <option value="">— None —</option>
+              {catCols.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
+            </select>
+          </div>
+        )}
+
+        {!isHistOrBox && chartType !== "stacked_bar" && (
+          <div className="chart-control-group">
+            <label className="chart-label" htmlFor="chart-agg-select">Aggregation</label>
+            <select id="chart-agg-select" className="chart-select" value={agg} onChange={(e) => setAgg(e.target.value)}
+              disabled={chartType === "scatter" || chartType === "pie"}>
+              <option value="count">Count</option>
+              <option value="sum">Sum</option>
+              <option value="mean">Mean</option>
+            </select>
+          </div>
+        )}
+
+        <button id="chart-generate-btn" className="apply-button chart-go-btn"
           onClick={() => doFetch()}
-          disabled={loading || !xCol || (needsY && !yCol)}
-        >
+          disabled={loading || !xCol || (needsY && !yCol) || (needsStack && !stackCol)}>
           {loading ? "Loading…" : "Generate chart"}
         </button>
       </div>
@@ -660,7 +744,7 @@ function ChartBuilder({ datasetId, columns }) {
       {chartData && !loading && (
         <div className="chart-meta">
           {chartData.group_count} groups&nbsp;·&nbsp;{chartData.row_count?.toLocaleString()} rows
-          &nbsp;·&nbsp;{chartData.x_label} → {chartData.y_label}
+          &nbsp;·&nbsp;{chartData.x_label}{chartData.y_label && chartData.y_label !== "Count" ? ` → ${chartData.y_label}` : ""}
         </div>
       )}
     </div>
@@ -983,6 +1067,9 @@ export default function App() {
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // Last chart generated — passed to ChatBot for visualization-aware replies
+  const [lastChartData, setLastChartData] = useState(null);
+
   // Steps override — set when chat proposes an action that we want to apply.
   const [chatPendingSteps, setChatPendingSteps] = useState(null);
 
@@ -1191,6 +1278,7 @@ export default function App() {
     setCleaningError(null);
     setPreviewData(null);
     setChatPendingSteps(null);
+    setLastChartData(null);
     setError(null);
   };
 
@@ -1379,6 +1467,7 @@ export default function App() {
           <ChartBuilder
             datasetId={displayReport.dataset_id}
             columns={displayReport.columns || []}
+            onChartDataFetched={setLastChartData}
           />
 
           <button className="reset-link" onClick={resetAll}>
@@ -1390,6 +1479,7 @@ export default function App() {
       <ChatBot
         datasetId={displayReport?.dataset_id}
         onPreviewChatAction={handleChatPreviewAction}
+        chartContext={lastChartData}
       />
     </div>
   );

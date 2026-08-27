@@ -121,16 +121,19 @@ export async function downloadCleanedFile(datasetId, format = "csv", fallbackFil
   }, 200);
 }
 
-export async function sendChatMessage(message, datasetId = null) {
+export async function sendChatMessage(message, datasetId = null, chartContext = null) {
+  const body = { message, dataset_id: datasetId };
+  if (chartContext) body.chart_context = chartContext;
+
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, dataset_id: datasetId }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Failed to send chat message (${res.status})`);
+    const body2 = await res.json().catch(() => ({}));
+    throw new Error(body2.detail || `Failed to send chat message (${res.status})`);
   }
 
   return res.json();
