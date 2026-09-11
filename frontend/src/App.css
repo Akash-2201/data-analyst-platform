@@ -63,7 +63,7 @@
   }
   to {
     opacity: 1;
-    max-height: 1000px;
+    max-height: 9999px;
     transform: translateY(0);
   }
 }
@@ -89,8 +89,25 @@
 
 .smooth-expand {
   animation: smoothExpand 0.4s ease-out forwards;
-  overflow: hidden;
+  /* overflow:hidden intentionally omitted — it would clip content past max-height
+     and block pointer events on anything beyond 1000px (sticky footer, dropdowns, etc.) */
 }
+
+/* Lightweight entrance animation — opacity + translate only, no overflow/max-height.
+   Use this instead of .smooth-expand on containers that manage their own overflow
+   (e.g. the review scroll container with overflow-y:auto + max-height:540px). */
+.fade-in-section {
+  animation: fadeInUp 0.35s ease-out forwards;
+}
+
+/* Opacity-only entrance — no transform.  Used on scroll containers (overflow-y:auto)
+   so the retained translateY(0) from fadeInUp doesn't create a stacking context
+   that breaks sticky positioning and causes card-header ghosting / doubling. */
+@keyframes fadeInOnly {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 
 /* --- Dropzone --- */
 
@@ -1289,71 +1306,101 @@
   margin-bottom: 2px;
 }
 
-/* --- Manual Per-Column Review Section --- */
+/* --- Review & Standardize Section (accordion layout) --- */
 
-.manual-review-scroll-container {
-  max-height: 540px;
+.review-section-scroll {
+  max-height: 70vh;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #faf9f7;
+  padding: 12px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
 
-.manual-review-scroll-container::-webkit-scrollbar {
+.review-section-scroll::-webkit-scrollbar {
   width: 6px;
 }
 
-.manual-review-scroll-container::-webkit-scrollbar-track {
+.review-section-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.manual-review-scroll-container::-webkit-scrollbar-thumb {
+.review-section-scroll::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 3px;
 }
 
-.manual-review-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.manual-review-card {
+/* Native <details> accordion — zero JS state, zero positioning bugs */
+.review-accordion {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: white;
-  overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.manual-review-header {
-  padding: 12px 16px;
-  background: #fbfaf8;
-  border-bottom: 1px solid var(--line);
+.review-accordion[open] {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(28, 110, 140, 0.08);
+}
+
+.review-accordion summary {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;             /* kill default marker */
+  background: #f4f3ef;
+  border-radius: 6px;
+  transition: background 0.15s ease;
 }
 
-.manual-review-title-group {
+.review-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.review-accordion summary::before {
+  content: "▶";
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-right: 10px;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.review-accordion[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.review-accordion[open] summary {
+  border-radius: 6px 6px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-accordion summary:hover {
+  background: #eae9e5;
+}
+
+.review-summary-left {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
-.manual-review-title {
+.review-summary-title {
   font-weight: 700;
   font-size: 15px;
   color: var(--ink);
   font-family: var(--font-mono);
 }
 
-.manual-review-badge {
+.review-summary-badge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 12px;
@@ -1361,12 +1408,80 @@
   color: var(--accent);
   font-weight: 600;
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
-.cat-card-hint {
+.review-summary-right {
   font-size: 12px;
   color: var(--ink-soft);
+  white-space: nowrap;
+  margin-left: 12px;
 }
+
+/* Accordion body — normal flow, no overflow tricks */
+.review-accordion-body {
+  padding: 0;
+}
+
+/* --- Per-column case / style selector --- */
+
+.case-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fcfbf9;
+}
+
+.case-selector-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  font-weight: 600;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.case-btn-group {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.case-btn {
+  background: white;
+  border: none;
+  border-right: 1px solid var(--line);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.case-btn:last-child {
+  border-right: none;
+}
+
+.case-btn:hover {
+  background: #f0efeb;
+  color: var(--ink);
+}
+
+.case-btn.active {
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+}
+
+/* --- Table inside accordion (reused from old layout) --- */
 
 .cat-review-table {
   width: 100%;
@@ -1467,7 +1582,7 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   font-size: 12px;
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   background: white;
   color: var(--ink);
   cursor: pointer;
@@ -1514,19 +1629,19 @@
   gap: 4px;
 }
 
-.manual-review-footer {
+/* Footer — normal document flow, no sticky */
+.review-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
-  background: #faf9f7;
-  border-top: 1px solid var(--line);
-  position: sticky;
-  bottom: 0;
-  flex-shrink: 0;
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.manual-review-summary {
+.review-footer-summary {
   font-size: 13px;
   color: var(--ink-soft);
   font-family: var(--font-mono);
@@ -1606,4 +1721,522 @@
   color: var(--ink);
 }
 
+/* --- Clean / Verified Columns Strip --- */
+.clean-columns-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #f4f7f4;
+  border: 1px solid #d4e8d4;
+  border-radius: 6px;
+  font-size: 12px;
+}
 
+.clean-columns-label {
+  font-weight: 700;
+  color: #2e7d32;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.clean-columns-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.clean-col-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: white;
+  border: 1px solid #a5d6a7;
+  color: #1b5e20;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+/* --- Date Format Standardization Cards --- */
+.date-accordion {
+  border-left: 3px solid #0288d1;
+}
+
+.date-badge {
+  background: #e1f5fe;
+  color: #0277bd;
+}
+
+.date-summary-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ambiguous-summary-tag {
+  background: #fef7e0;
+  color: #b06000;
+  border: 1px solid #f9ab00;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.clean-summary-tag {
+  background: #e8f2ea;
+  color: var(--good);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.date-table-header,
+.date-table-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 1.6fr 1.4fr;
+  gap: 10px;
+}
+
+.row-ambiguous {
+  background: rgba(249, 171, 0, 0.04);
+}
+
+.row-ambiguous:hover {
+  background: rgba(249, 171, 0, 0.08);
+}
+
+.date-chip {
+  background: #e8eef3;
+  color: #153243;
+}
+
+.td-ambiguous {
+  display: flex;
+  align-items: center;
+}
+
+.ambiguous-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.conf-pill.ambiguous {
+  background: #fef7e0;
+  color: #b06000;
+  border: 1px solid #f9ab00;
+  cursor: help;
+}
+
+.conf-pill.date-canonical {
+  background: #e8f2ea;
+  color: var(--good);
+}
+
+.ambiguous-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ambiguous-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ambiguous-choice-select {
+  padding: 3px 6px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: white;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.ambiguous-choice-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.date-preview-cell {
+  display: flex;
+  align-items: center;
+}
+
+.date-excluded-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b06000;
+  background: #fff8e1;
+  border: 1px dashed #f9ab00;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  cursor: help;
+}
+
+.date-preview-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reformatted-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: #e8f2ea;
+  color: #137333;
+  border: 1px solid #c6e7ce;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+/* Categorical optgroup divider styling */
+optgroup {
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: #f4f3ef;
+  font-size: 11px;
+}
+
+optgroup option {
+  font-weight: normal;
+  color: var(--ink);
+  background: white;
+  font-size: 12px;
+}
+
+/* --- Clean Column Card (One Card per Column Guarantee) --- */
+.clean-column-card {
+  border-left: 3px solid #34a853;
+  padding: 12px 16px;
+  background: #fdfefd;
+}
+
+.clean-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.clean-check-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #e6f4ea;
+  color: #137333;
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.clean-type-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: #f1f3f4;
+  color: var(--ink-soft);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.clean-verified-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #137333;
+  background: #e6f4ea;
+  border: 1px solid #ceead6;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+/* --- Dataset Issues Card (Top of review scroll) --- */
+.dataset-issues-card {
+  border-left: 3px solid #ea4335;
+  background: #fffafa;
+  margin-bottom: 12px;
+  border-radius: 6px;
+}
+
+.dataset-issues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 4px 14px;
+}
+
+/* --- Structural Column Card --- */
+.structural-accordion {
+  border-left: 3px solid #fbbc04;
+}
+
+.structural-badge {
+  background: #fef7e0;
+  color: #b06000;
+}
+
+/* --- Extra Issues inside Date / Categorical Cards --- */
+.card-extra-issues {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.card-extra-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+/* --- Phase 6: Fix Individual Values Section --- */
+.fix-individual-container {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.fix-individual-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fix-individual-toggle-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.fix-individual-toggle-btn.open {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.fix-toggle-title {
+  display: flex;
+  align-items: center;
+}
+
+.fix-applied-badge {
+  font-size: 11px;
+  background: #dcfce7;
+  color: #15803d;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.fix-individual-body {
+  border: 1px solid #bfdbfe;
+  border-top: none;
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.fix-individual-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fix-table-header {
+  display: grid;
+  grid-template-columns: 1.5fr 2fr 2fr 1.2fr;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.fix-table-row {
+  display: grid;
+  grid-template-columns: 1.5fr 2fr 2fr 1.2fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px dashed #f1f5f9;
+}
+
+.fix-table-row:last-child {
+  border-bottom: none;
+}
+
+.fix-td-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fix-raw-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.fix-row-idx {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.fix-reason-text {
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.fix-input-field {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.fix-input-field:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.fix-apply-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e40af;
+  background: #dbeafe;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.fix-apply-btn:hover {
+  background: #bfdbfe;
+  color: #1e3a8a;
+}
+
+.fix-apply-btn.applied {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.fix-individual-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.fix-apply-all-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #2563eb;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.fix-apply-all-btn:hover {
+  background: #1d4ed8;
+}
+
+/* --- Phase 7: Chat Markdown Formatting --- */
+.chat-markdown {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-markdown p {
+  margin: 0 0 8px 0;
+}
+
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+
+.chat-markdown li {
+  margin-bottom: 4px;
+}
+
+.chat-markdown strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+.chat-markdown code {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.08);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.chat-markdown pre {
+  background: rgba(0, 0, 0, 0.12);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 6px 0;
+}

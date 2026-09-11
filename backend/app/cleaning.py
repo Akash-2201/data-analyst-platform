@@ -29,6 +29,31 @@ OPPOSITES: set[tuple[str, str]] = {
     ("m", "f"), ("f", "m"),
 }
 
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
+
+def clean_numeric_value(val: Any) -> Any:
+    """Normalize numeric values by stripping currency symbols, commas, and whitespace."""
+    if val is None or pd.isna(val):
+        return None
+    if isinstance(val, (int, float)):
+        return val
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none", "null", "n/a", "na", "-"):
+        return None
+    # Check for negative format: leading minus, negative sign, or parentheses e.g. (1,000)
+    is_neg = False
+    if (s.startswith("(") and s.endswith(")")) or s.startswith("-") or ("-" in s and not re.search(r"\d-\d", s)):
+        is_neg = True
+    cleaned = re.sub(r"[^\d.]", "", s)
+    if not cleaned or cleaned == ".":
+        return None
+    try:
+        num = float(cleaned) if "." in cleaned else int(cleaned)
+        return -num if is_neg else num
+    except (ValueError, TypeError):
+        return cleaned
+
 
 def find_near_duplicate_categories(
     series: pd.Series, cutoff: float = 0.6
@@ -118,6 +143,9 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
         missing_count = col.get("missing_count", 0)
         missing_pct = col.get("missing_pct", 0)
         inferred_type = col.get("inferred_type", "text")
+        col_lower = col_name.lower()
+        is_phone_col = (inferred_type == "phone") or any(k in col_lower for k in ("phone", "mobile", "contact"))
+        is_email_col = (inferred_type == "email") or any(k in col_lower for k in ("email", "e-mail"))
 
         # Missing values
         if missing_count > 0:
@@ -129,7 +157,7 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "description": f"Drop column '{col_name}' ({missing_pct}% missing values)",
                     "severity": "high",
                 })
-            elif inferred_type in ("numeric", "non_negative_numeric", "identifier"):
+            elif not is_phone_col and not is_email_col and inferred_type in ("numeric", "non_negative_numeric", "identifier"):
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "fill_missing",
@@ -146,37 +174,148 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "severity": "medium",
                 })
 
-        # Phase 3a: Non-numeric text values in numeric-typed columns
-        if inferred_type in ("numeric", "non_negative_numeric", "identifier") or pd.api.types.is_numeric_dtype(col_series):
+        # Phase 1: Dedicated Phone format validation (never type-converted or numerically coerced)
+        if is_phone_col:
+            invalid_phones: list[dict[str, Any]] = []
+            for idx, val in col_series.dropna().items():
+                s = str(val).strip()
+                if s.endswith(".0"):
+                    s = s[:-2]
+                digits = re.sub(r"\D", "", s)
+                has_letters = bool(re.search(r"[a-zA-Z]", s))
+                if has_letters or len(digits) < 10 or len(digits) > 15:
+                    reason = f"Invalid digit count ({len(digits)} digits, expected 10-15)" if not has_letters else "Contains alphabetic characters"
+                    invalid_phones.append({
+                        "row_index": int(idx),
+                        "raw_value": str(val),
+                        "suggested_value": str(digits if len(digits) >= 10 else s),
+                        "reason": reason,
+                    })
+            if invalid_phones:
+                suggestions.append({
+                    "id": str(uuid.uuid4()),
+                    "action": "flag_invalid_phone",
+                    "params": {"column": col_name, "flagged_count": len(invalid_phones)},
+                    "description": f"Flag {len(invalid_phones)} phone number{'s' if len(invalid_phones) > 1 else ''} with invalid format in '{col_name}'",
+                    "severity": "medium",
+                    "recommended": True,
+                    "flagged_values": invalid_phones,
+                })
+
+        # Phase 2: Dedicated Email structural check
+        if is_email_col:
+            for idx, val in col_series.dropna().items():
+                s = str(val).strip()
+                reason = None
+                suggested = s
+                if "@" not in s:
+                    reason = "missing @"
+                    if ".gmail.com" in s or ".yahoo.com" in s or ".com" in s:
+                        suggested = re.sub(r"\.(?=[^.]+\.[^.]+$)", "@", s, count=1)
+                    else:
+                        suggested = s + "@gmail.com"
+                elif s.count("@") > 1:
+                    reason = "double @"
+                    suggested = re.sub(r"@+", "@", s)
+                elif "." not in s.split("@")[-1] or s.split("@")[-1].endswith(".") or s.split("@")[-1].startswith("."):
+                    reason = "missing domain extension (no . after @)"
+                    suggested = s + ".com"
+                elif bool(re.search(r"\s", s)):
+                    reason = "whitespace inside address"
+                    suggested = re.sub(r"\s+", "", s)
+
+                if reason:
+                    suggestions.append({
+                        "id": str(uuid.uuid4()),
+                        "action": "flag_invalid_email",
+                        "params": {
+                            "column": col_name,
+                            "row_index": int(idx),
+                            "raw_value": str(val),
+                            "suggested_value": str(suggested),
+                            "reason": reason,
+                        },
+                        "description": f"Invalid email '{val}': {reason}",
+                        "severity": "medium",
+                        "recommended": True,
+                        "flagged_values": [{
+                            "row_index": int(idx),
+                            "raw_value": str(val),
+                            "suggested_value": str(suggested),
+                            "reason": reason,
+                        }],
+                    })
+
+        # Phase 3a & 4: Non-numeric text values or formatted numbers in numeric-typed columns (excluding phone)
+        if not is_phone_col and not is_email_col and (
+            inferred_type in ("numeric", "non_negative_numeric", "identifier") or pd.api.types.is_numeric_dtype(col_series)
+        ):
             non_null = col_series.dropna()
             if not non_null.empty:
-                coerced = pd.to_numeric(non_null, errors="coerce")
+                raw_coerced = pd.to_numeric(non_null, errors="coerce")
+                raw_fails = int((non_null.notna() & raw_coerced.isna()).sum())
+
+                cleaned_non_null = non_null.apply(clean_numeric_value)
+                coerced = pd.to_numeric(cleaned_non_null, errors="coerce")
                 failed_mask = non_null.notna() & coerced.isna()
-                text_val_count = int(failed_mask.sum())
-                if text_val_count > 0:
+                unparseable_count = int(failed_mask.sum())
+
+                is_stored_as_text = str(col_series.dtype) == "object" or not pd.api.types.is_numeric_dtype(col_series)
+
+                if unparseable_count > 0:
                     suggestions.append({
                         "id": str(uuid.uuid4()),
                         "action": "coerce_numeric",
                         "params": {"column": col_name},
-                        "description": f"Convert {text_val_count} non-numeric text value{'s' if text_val_count > 1 else ''} in '{col_name}' to NaN",
+                        "description": f"Convert {unparseable_count} non-numeric text value{'s' if unparseable_count > 1 else ''} in '{col_name}' to NaN",
                         "severity": "high",
                     })
+                elif is_stored_as_text and (inferred_type in ("numeric", "non_negative_numeric") or raw_fails > 0):
+                    suggestions.append({
+                        "id": str(uuid.uuid4()),
+                        "action": "coerce_numeric",
+                        "params": {"column": col_name},
+                        "description": f"Convert '{col_name}' to numeric (strip currency symbols and commas)",
+                        "severity": "medium",
+                    })
 
-        # Phase 3b: Negative values in non_negative_numeric columns
-        if inferred_type == "non_negative_numeric":
-            coerced_nums = pd.to_numeric(col_series, errors="coerce")
-            neg_count = int((coerced_nums < 0).sum())
+        # Phase 3b: Negative values in non_negative_numeric columns (excluding phone)
+        if not is_phone_col and not is_email_col and inferred_type == "non_negative_numeric":
+            coerced_nums = pd.to_numeric(col_series.apply(clean_numeric_value), errors="coerce")
+            neg_mask = coerced_nums < 0
+            neg_count = int(neg_mask.sum())
             if neg_count > 0:
+                flagged_items = []
+                for idx in col_series.index[neg_mask]:
+                    raw_v = col_series.loc[idx]
+                    num_v = coerced_nums.loc[idx]
+                    sugg_v = abs(num_v) if pd.notna(num_v) else 0
+                    if hasattr(sugg_v, "item"):
+                        sugg_v = sugg_v.item()
+                    raw_out = raw_v
+                    if hasattr(raw_out, "item"):
+                        raw_out = raw_out.item()
+                    elif not isinstance(raw_out, (int, float, str)):
+                        raw_out = str(raw_out)
+
+                    flagged_items.append({
+                        "row_index": int(idx),
+                        "raw_value": raw_out,
+                        "suggested_value": sugg_v,
+                        "reason": f"Negative value ({raw_v}) in non-negative column",
+                    })
+                val_previews = ", ".join(str(f["raw_value"]) for f in flagged_items[:3])
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "flag_negative_values",
                     "params": {"column": col_name},
-                    "description": f"Flag {neg_count} negative value{'s' if neg_count > 1 else ''} in '{col_name}' (clip to null as alternative)",
+                    "description": f"Flag {neg_count} negative value{'s' if neg_count > 1 else ''} in '{col_name}': {val_previews}",
                     "severity": "medium",
+                    "flagged_values": flagged_items,
                 })
 
-        # Text cleanliness checks for text/categorical columns
-        if inferred_type in ("text", "categorical", "email", "phone") or str(col_series.dtype) == "object":
+        # Text cleanliness checks for text/categorical columns (excluding phone)
+        if not is_phone_col and (inferred_type in ("text", "categorical", "email") or str(col_series.dtype) == "object"):
             non_null_str = col_series.dropna().astype(str)
             if not non_null_str.empty:
                 # 1a. Extra spaces
@@ -193,7 +332,8 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
 
                 # 1b. Fuzzy category consistency (standardize_category)
                 has_category_clusters = False
-                if inferred_type not in ("numeric", "non_negative_numeric", "identifier") and (
+                is_date_col = inferred_type in ("datetime", "date") or any(k in col_name.lower() for k in ("date", "dob"))
+                if not is_date_col and inferred_type not in ("numeric", "non_negative_numeric", "identifier", "email") and (
                     inferred_type in ("categorical", "text")
                     or (str(col_series.dtype) == "object" and col_series.nunique() < 50)
                 ):
@@ -241,17 +381,18 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         "severity": "low",
                     })
 
-        # 3. Numeric outlier checks
-        numeric_stats = col.get("numeric_stats")
-        if numeric_stats and numeric_stats.get("outlier_count", 0) > 0:
-            outlier_cnt = numeric_stats["outlier_count"]
-            suggestions.append({
-                "id": str(uuid.uuid4()),
-                "action": "remove_outliers",
-                "params": {"column": col_name, "method": "iqr"},
-                "description": f"Remove {outlier_cnt} outlier row{'s' if outlier_cnt > 1 else ''} in '{col_name}' (IQR method)",
-                "severity": "medium",
-            })
+        # 3. Numeric outlier checks (excluding phone)
+        if not is_phone_col:
+            numeric_stats = col.get("numeric_stats")
+            if numeric_stats and numeric_stats.get("outlier_count", 0) > 0:
+                outlier_cnt = numeric_stats["outlier_count"]
+                suggestions.append({
+                    "id": str(uuid.uuid4()),
+                    "action": "remove_outliers",
+                    "params": {"column": col_name, "method": "iqr"},
+                    "description": f"Flag {outlier_cnt} outlier{'s' if outlier_cnt > 1 else ''} in '{col_name}' with IQR method (adds '{col_name}_outlier' column)",
+                    "severity": "medium",
+                })
 
     return suggestions
 
@@ -321,59 +462,125 @@ def apply_pipeline(
             case = params.get("case", "title")
             if col and col in cleaned_df.columns:
                 non_null_mask = cleaned_df[col].notna()
+                # When a style is applied, also strip leading/trailing whitespace and collapse internal double-spaces
+                trimmed = (
+                    cleaned_df.loc[non_null_mask, col]
+                    .astype(str)
+                    .str.strip()
+                    .str.replace(r"\s+", " ", regex=True)
+                )
                 if case == "title":
-                    cleaned_df.loc[non_null_mask, col] = (
-                        cleaned_df.loc[non_null_mask, col].astype(str).str.title()
-                    )
+                    cleaned_df.loc[non_null_mask, col] = trimmed.str.title()
                 elif case == "lower":
-                    cleaned_df.loc[non_null_mask, col] = (
-                        cleaned_df.loc[non_null_mask, col].astype(str).str.lower()
-                    )
+                    cleaned_df.loc[non_null_mask, col] = trimmed.str.lower()
                 elif case == "upper":
-                    cleaned_df.loc[non_null_mask, col] = (
-                        cleaned_df.loc[non_null_mask, col].astype(str).str.upper()
-                    )
+                    cleaned_df.loc[non_null_mask, col] = trimmed.str.upper()
         elif action == "standardize_category":
             col = params.get("column")
             mapping = params.get("mapping", {})
             if col and col in cleaned_df.columns and mapping:
-                cleaned_df[col] = cleaned_df[col].replace(mapping)
-                resilient_mapping = {}
+                # Phase 3: Build mapping ONCE per distinct raw value before touching any rows
+                norm_map: dict[str, str] = {}
                 for k, v in mapping.items():
                     k_str = str(k)
-                    resilient_mapping[k_str] = v
-                    resilient_mapping[k_str.strip()] = v
-                    resilient_mapping[k_str.lower()] = v
-                    resilient_mapping[k_str.upper()] = v
-                    resilient_mapping[k_str.title()] = v
-                cleaned_df[col] = cleaned_df[col].replace(resilient_mapping)
+                    if k_str not in norm_map:
+                        norm_map[k_str] = v
+                    k_strip = k_str.strip()
+                    if k_strip not in norm_map:
+                        norm_map[k_strip] = v
+                    k_lower = k_strip.lower()
+                    if k_lower not in norm_map:
+                        norm_map[k_lower] = v
+
+                distinct_vals = cleaned_df[col].dropna().unique()
+                lookup: dict[Any, Any] = {}
+                for val in distinct_vals:
+                    v_str = str(val)
+                    v_strip = v_str.strip()
+                    v_lower = v_strip.lower()
+                    if v_str in mapping:
+                        lookup[val] = mapping[v_str]
+                    elif v_strip in mapping:
+                        lookup[val] = mapping[v_strip]
+                    elif v_str in norm_map:
+                        lookup[val] = norm_map[v_str]
+                    elif v_strip in norm_map:
+                        lookup[val] = norm_map[v_strip]
+                    elif v_lower in norm_map:
+                        lookup[val] = norm_map[v_lower]
+
+                if lookup:
+                    cleaned_df[col] = cleaned_df[col].replace(lookup)
+        elif action == "standardize_date_format":
+            col = params.get("column")
+            value_map = params.get("value_map") or {}
+            if col and col in cleaned_df.columns and value_map:
+                cleaned_df[col] = cleaned_df[col].replace(value_map)
+                resilient_map = {}
+                for k, v in value_map.items():
+                    k_str = str(k)
+                    resilient_map[k_str] = v
+                    resilient_map[k_str.strip()] = v
+                cleaned_df[col] = cleaned_df[col].replace(resilient_map)
         elif action == "coerce_numeric":
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
+                # Phase 1: Explicitly exclude phone columns from coerce_numeric
+                col_lower = col.lower()
+                is_phone = (col_lower in ("phone", "mobile", "contact_no")) or ("phone" in col_lower)
+                if not is_phone:
+                    # Phase 4: Strip commas and currency symbols before pd.to_numeric
+                    cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                    cleaned_df[col] = pd.to_numeric(cleaned_series, errors="coerce")
         elif action == "flag_negative_values":
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                num = pd.to_numeric(cleaned_df[col], errors="coerce")
+                cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                num = pd.to_numeric(cleaned_series, errors="coerce")
                 cleaned_df[f"{col}_flag_negative"] = num < 0
         elif action == "clip_negative_to_null":
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                num = pd.to_numeric(cleaned_df[col], errors="coerce")
+                cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                num = pd.to_numeric(cleaned_series, errors="coerce")
                 cleaned_df.loc[num < 0, col] = None
+        elif action == "manual_value_override":
+            # Phase 6: Direct cell value overrides by row index or matching raw value
+            col = params.get("column")
+            overrides = params.get("overrides", {})
+            if col and col in cleaned_df.columns and overrides:
+                for key, new_val in overrides.items():
+                    set_by_idx = False
+                    try:
+                        idx = int(key)
+                        if idx in cleaned_df.index:
+                            cleaned_df.at[idx, col] = new_val
+                            set_by_idx = True
+                    except (ValueError, TypeError):
+                        set_by_idx = False
+
+                    if not set_by_idx:
+                        mask = cleaned_df[col].astype(str) == str(key)
+                        if mask.any():
+                            cleaned_df.loc[mask, col] = new_val
         elif action == "remove_outliers":
+            # Non-destructive: add a boolean flag column instead of deleting rows.
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                num = pd.to_numeric(cleaned_df[col], errors="coerce")
-                non_null = num.dropna()
-                if not non_null.empty:
-                    q1 = non_null.quantile(0.25)
-                    q3 = non_null.quantile(0.75)
-                    iqr = q3 - q1
-                    lower_fence = q1 - 1.5 * iqr
-                    upper_fence = q3 + 1.5 * iqr
-                    outlier_mask = (num < lower_fence) | (num > upper_fence)
-                    cleaned_df = cleaned_df[~outlier_mask]
+                col_lower = col.lower()
+                is_phone = (col_lower in ("phone", "mobile", "contact_no")) or ("phone" in col_lower)
+                if not is_phone:
+                    cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                    num = pd.to_numeric(cleaned_series, errors="coerce")
+                    non_null = num.dropna()
+                    if not non_null.empty:
+                        q1 = non_null.quantile(0.25)
+                        q3 = non_null.quantile(0.75)
+                        iqr = q3 - q1
+                        lower_fence = q1 - 1.5 * iqr
+                        upper_fence = q3 + 1.5 * iqr
+                        outlier_mask = (num < lower_fence) | (num > upper_fence)
+                        cleaned_df[f"{col}_outlier"] = outlier_mask.fillna(False)
 
         rows_after = len(cleaned_df)
         rows_affected = max(0, rows_before - rows_after)

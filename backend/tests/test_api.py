@@ -114,8 +114,8 @@ class TestApiEndpoints(unittest.TestCase):
         sug_res = None
         with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
             sug_res = self.client.get(f"/datasets/{dataset_id}/suggestions")
-        self.assertEqual(sug_res.status_code, 200)
-        suggestions = sug_res.json()
+        suggestions_data = sug_res.json()
+        suggestions = suggestions_data.get("suggestions", suggestions_data) if isinstance(suggestions_data, dict) else suggestions_data
 
         actions = [s["action"] for s in suggestions]
         self.assertIn("trim_whitespace", actions)

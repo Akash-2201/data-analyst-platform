@@ -17,6 +17,7 @@ import {
   sendChatMessage,
   getChartData,
 } from "./api";
+import ReactMarkdown from "react-markdown";
 import "./App.css";
 
 // ---------------------------------------------------------------------------
@@ -151,19 +152,13 @@ function ChatBot({ datasetId, onPreviewChatAction, chartContext }) {
 
                 return (
                   <div key={idx} className="chat-message-group">
-                    <div
-                      className={`chat-bubble ${msg.sender === "user" ? "user" : "assistant"}`}
-                    >
-                      {msg.text}
-                    </div>
-                    {msg.proposed_action && actionEntry !== undefined && (
+                    {msg.sender === "user" ? (
+                      <div className="chat-bubble user">{msg.text}</div>
+                    ) : msg.proposed_action && actionEntry !== undefined ? (
                       <div className="chat-action-card">
-                        <div className="chat-action-op">
-                          <span className="chat-action-label">Suggested fix</span>
-                          <span className="log-action">{msg.proposed_action.operation}</span>
-                          <span className="chat-action-col">on&nbsp;<strong>{msg.proposed_action.column}</strong></span>
+                        <div className="chat-markdown">
+                          <ReactMarkdown>{msg.text || msg.proposed_action.reasoning}</ReactMarkdown>
                         </div>
-                        <div className="chat-action-reasoning">{msg.proposed_action.reasoning}</div>
                         <button
                           className="chat-preview-btn"
                           disabled={actionEntry?.previewLoading || !datasetId}
@@ -178,6 +173,12 @@ function ChatBot({ datasetId, onPreviewChatAction, chartContext }) {
                         >
                           {actionEntry?.previewLoading ? "Loading preview…" : "Preview this fix"}
                         </button>
+                      </div>
+                    ) : (
+                      <div className="chat-bubble assistant">
+                        <div className="chat-markdown">
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -271,7 +272,10 @@ function QualityBars({ column }) {
     setMounted(false);
     const timer = setTimeout(() => setMounted(true), 50);
     return () => clearTimeout(timer);
-  }, [column.name]); // ← dep on column.name, not [] — fixes stale animation on re-upload
+    // Deps include the actual pct values so the animation re-triggers whenever the data
+    // changes — critical for large datasets where unique_pct can be very small (e.g. 0.01%)
+    // and for re-uploads where column names stay the same but values differ.
+  }, [column.name, column.missing_pct, column.unique_pct]); // ← Phase 1 fix: data-value deps
 
   // Clamp to [0, 100] to guard against NaN or floating-point drift exceeding 100%
   const missingPct = Math.min(100, Math.max(0, column.missing_pct || 0));
@@ -875,6 +879,214 @@ function PreviewPanel({ previewData, onConfirm, onCancel, loading }) {
   );
 }
 
+function DateReviewCard({
+  column,
+  dateItems = [],
+  totalRows = 0,
+  selectedStyle = "YYYY-MM-DD",
+  onStyleChange,
+  confirmedAmbiguous = {},
+  onConfirmAmbiguous,
+  extraIssues = [],
+  selectedStructuralIds,
+  onToggleStructural,
+  manualOverrides = {},
+  onSaveOverride,
+}) {
+  const DATE_STYLE_OPTIONS = [
+    { key: "YYYY-MM-DD", label: "YYYY-MM-DD" },
+    { key: "DD-MM-YYYY", label: "DD-MM-YYYY" },
+    { key: "DD/MM/YYYY", label: "DD/MM/YYYY" },
+    { key: "MM/DD/YYYY", label: "MM/DD/YYYY" },
+    { key: "DD Mon YYYY", label: "DD Mon YYYY" },
+  ];
+
+  const ambiguousCount = dateItems.filter((it) => it.ambiguous).length;
+  const confirmedCount = Object.keys(confirmedAmbiguous).length;
+
+  return (
+    <details className="review-accordion date-accordion" open>
+      <summary>
+        <div className="review-summary-left">
+          <span className="review-summary-title">{column}</span>
+          <span className="review-summary-badge date-badge">{dateItems.length} distinct dates</span>
+        </div>
+        <span className="review-summary-right date-summary-right">
+          {ambiguousCount > 0 ? (
+            <span className="ambiguous-summary-tag">
+              ⚠️ {ambiguousCount} ambiguous date{ambiguousCount > 1 ? "s" : ""}{confirmedCount > 0 ? ` (${confirmedCount} confirmed)` : ""}
+            </span>
+          ) : (
+            <span className="clean-summary-tag">✓ All dates unambiguous</span>
+          )}
+        </span>
+      </summary>
+
+      <div className="review-accordion-body">
+        {/* Style selector row */}
+        <div className="case-selector-row date-selector-row">
+          <span className="case-selector-label">Target Format</span>
+          <div className="case-btn-group date-btn-group">
+            {DATE_STYLE_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                className={`case-btn date-style-btn${selectedStyle === opt.key ? " active" : ""}`}
+                onClick={() => onStyleChange && onStyleChange(column, opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Date review table */}
+        <div className="cat-review-table date-review-table">
+          <div className="cat-table-header date-table-header">
+            <span>Distinct Raw Value</span>
+            <span>Count</span>
+            <span>Detection & Ambiguity</span>
+            <span>Reformatted Target Preview</span>
+          </div>
+
+          {dateItems.map((item) => {
+            const rawVal = item.raw;
+            const count = item.count;
+            const pct = totalRows > 0 ? ((count / totalRows) * 100).toFixed(1) : null;
+            const isAmbiguous = item.ambiguous;
+            const isConfirmed = confirmedAmbiguous[rawVal] !== undefined;
+            const activeInterpretation = confirmedAmbiguous[rawVal] || "dayfirst";
+
+            const previewVal =
+              activeInterpretation === "monthfirst" && item.alt_formats?.[selectedStyle]
+                ? item.alt_formats[selectedStyle]
+                : item.formats?.[selectedStyle] || rawVal;
+
+            return (
+              <div className={`cat-table-row date-table-row${isAmbiguous ? " row-ambiguous" : ""}`} key={rawVal}>
+                <div className="td-val">
+                  <span className="raw-val-chip date-chip" title={rawVal}>
+                    {rawVal}
+                  </span>
+                </div>
+
+                <div className="td-count">
+                  <span className="count-num">{count.toLocaleString()}</span>
+                  {pct && <span className="count-pct">({pct}%)</span>}
+                </div>
+
+                <div className="td-conf td-ambiguous">
+                  {isAmbiguous ? (
+                    <div className="ambiguous-box">
+                      <span className="conf-pill ambiguous" title={`Day-first: ${item.dayfirst_preview} vs Month-first: ${item.monthfirst_preview}`}>
+                        ⚠️ Ambiguous format
+                      </span>
+                      <div className="ambiguous-controls">
+                        <label className="ambiguous-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={isConfirmed}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                onConfirmAmbiguous(column, rawVal, "dayfirst");
+                              } else {
+                                onConfirmAmbiguous(column, rawVal, null);
+                              }
+                            }}
+                          />
+                          <span>Confirm</span>
+                        </label>
+                        {isConfirmed && (
+                          <select
+                            className="ambiguous-choice-select"
+                            value={activeInterpretation}
+                            onChange={(e) => onConfirmAmbiguous(column, rawVal, e.target.value)}
+                          >
+                            <option value="dayfirst">Day-first ({item.dayfirst_preview})</option>
+                            <option value="monthfirst">Month-first ({item.monthfirst_preview})</option>
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="conf-pill canonical date-canonical">✓ Unambiguous</span>
+                  )}
+                </div>
+
+                <div className="td-target date-preview-cell">
+                  {isAmbiguous && !isConfirmed ? (
+                    <span className="date-excluded-tag" title="Excluded from auto-apply until confirmed">
+                      ⚠️ Excluded (confirm to apply)
+                    </span>
+                  ) : (
+                    <div className="date-preview-display">
+                      <span className="preview-arrow">→</span>
+                      <span className="reformatted-chip">{previewVal}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {extraIssues.length > 0 && (
+          <div className="card-extra-issues">
+            <div className="card-extra-title">Additional Fixes for '{column}'</div>
+            <div className="structural-list">
+              {extraIssues.map((s) => {
+                const isChecked = selectedStructuralIds ? selectedStructuralIds.has(s.id) : false;
+                return (
+                  <label className={`structural-row${isChecked ? " selected" : ""}`} key={s.id}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggleStructural && onToggleStructural(s.id)}
+                    />
+                    <div className="structural-info">
+                      <span className="structural-action">{s.action}</span>
+                      <span className="structural-desc">{s.description}</span>
+                    </div>
+                    <span className={`severity-badge ${s.severity}`}>{s.severity}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {(() => {
+              const extraFlagged = [];
+              extraIssues.forEach((s) => {
+                if (Array.isArray(s.flagged_values) && s.flagged_values.length > 0) {
+                  extraFlagged.push(...s.flagged_values);
+                } else if (s.params?.raw_value !== undefined) {
+                  extraFlagged.push({
+                    row_index: s.params.row_index,
+                    raw_value: s.params.raw_value,
+                    suggested_value: s.params.suggested_value,
+                    reason: s.params.reason || s.description,
+                  });
+                }
+              });
+              if (extraFlagged.length > 0) {
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <FixIndividualValuesSection
+                      column={column}
+                      flaggedItems={extraFlagged}
+                      manualOverrides={manualOverrides}
+                      onSaveOverride={onSaveOverride}
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function CategoricalReviewCard({
   column,
   distinctValues = {},
@@ -883,6 +1095,13 @@ function CategoricalReviewCard({
   mapping = {},
   totalRows = 0,
   onValueChange,
+  casePreference = "keep",
+  onCaseChange,
+  extraIssues = [],
+  selectedStructuralIds,
+  onToggleStructural,
+  manualOverrides = {},
+  onSaveOverride,
 }) {
   const canonicalTargets = Array.from(
     new Set([
@@ -895,145 +1114,534 @@ function CategoricalReviewCard({
 
   const sortedDistinct = Object.entries(distinctValues).sort((a, b) => b[1] - a[1]);
 
+  /** Apply the active case transform to a canonical target string */
+  const applyCase = (str) => {
+    if (!str) return str;
+    switch (casePreference) {
+      case "upper": return str.toUpperCase();
+      case "lower": return str.toLowerCase();
+      case "title": return str.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+      default: return str;
+    }
+  };
+
+  /** Get the displayed canonical target for a raw value, respecting case pref */
+  const getDisplayTarget = (rawVal) => {
+    const mapped = mapping[rawVal] || rawVal;
+    if (casePreference === "keep") return mapped;
+    return applyCase(mapped);
+  };
+
+  const CASE_OPTIONS = [
+    { key: "keep", label: "Keep as-is" },
+    { key: "upper", label: "UPPER" },
+    { key: "title", label: "Title" },
+    { key: "lower", label: "lower" },
+  ];
+
   return (
-    <div className="manual-review-card">
-      <div className="manual-review-header">
-        <div className="manual-review-title-group">
-          <span className="manual-review-title">{column}</span>
-          <span className="manual-review-badge">{sortedDistinct.length} distinct values</span>
+    <details className="review-accordion" open>
+      <summary>
+        <div className="review-summary-left">
+          <span className="review-summary-title">{column}</span>
+          <span className="review-summary-badge">{sortedDistinct.length} distinct</span>
         </div>
-        <div className="cat-card-hint">
+        <span className="review-summary-right">
           {groups.length > 0
-            ? `${groups.length} suggested target group${groups.length > 1 ? "s" : ""}`
-            : "Review and map values"}
+            ? `${groups.length} suggested group${groups.length > 1 ? "s" : ""}`
+            : "Review values"}
+        </span>
+      </summary>
+
+      <div className="review-accordion-body">
+        {/* Case / style selector */}
+        <div className="case-selector-row">
+          <span className="case-selector-label">Style</span>
+          <div className="case-btn-group">
+            {CASE_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                className={`case-btn${casePreference === opt.key ? " active" : ""}`}
+                onClick={() => onCaseChange && onCaseChange(column, opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="cat-review-table">
-        <div className="cat-table-header">
-          <span>Distinct Raw Value</span>
-          <span>Count</span>
-          <span>Detection Type</span>
-          <span>Assign Canonical Group</span>
-        </div>
+        {/* Table */}
+        <div className="cat-review-table">
+          <div className="cat-table-header">
+            <span>Distinct Raw Value</span>
+            <span>Count</span>
+            <span>Detection Type</span>
+            <span>Assign Canonical Group</span>
+          </div>
 
-        {sortedDistinct.map(([rawVal, count]) => {
-          const conf = variantConfidences[rawVal] || (canonicalTargets.includes(rawVal) ? "canonical" : "none");
-          const currentTarget = mapping[rawVal] || rawVal;
-          const isCustom = customInputs[rawVal] !== undefined;
-          const pct = totalRows > 0 ? ((count / totalRows) * 100).toFixed(1) : null;
+          {sortedDistinct.map(([rawVal, count]) => {
+            const conf = variantConfidences[rawVal] || (canonicalTargets.includes(rawVal) ? "canonical" : "none");
+            const displayTarget = getDisplayTarget(rawVal);
+            const isCustom = customInputs[rawVal] !== undefined;
+            const pct = totalRows > 0 ? ((count / totalRows) * 100).toFixed(1) : null;
 
-          return (
-            <div className="cat-table-row" key={rawVal}>
-              <div className="td-val">
-                <span className="raw-val-chip" title={rawVal}>
-                  {rawVal === "" ? "— (empty)" : rawVal}
-                </span>
-              </div>
+            const currentVal = mapping[rawVal] || rawVal;
+            const isAiSuggestedMerge = displayTarget !== rawVal;
+            const otherCanonicals = canonicalTargets.filter(
+              (c) => c !== rawVal && c !== displayTarget && c !== currentVal
+            );
 
-              <div className="td-count">
-                <span className="count-num">{count.toLocaleString()}</span>
-                {pct && <span className="count-pct">({pct}%)</span>}
-              </div>
-
-              <div className="td-conf">
-                {canonicalTargets.includes(rawVal) ? (
-                  <span className="conf-pill canonical">Canonical</span>
-                ) : conf === "low" ? (
-                  <span className="conf-pill low" title="Abbreviation or initial detected — defaults to keep original">
-                    Abbreviation (low conf)
+            return (
+              <div className="cat-table-row" key={rawVal}>
+                <div className="td-val">
+                  <span className="raw-val-chip" title={rawVal}>
+                    {rawVal === "" ? "— (empty)" : rawVal}
                   </span>
-                ) : conf === "high" ? (
-                  <span className="conf-pill high">Exact / Typo</span>
-                ) : (
-                  <span className="conf-pill neutral">Original</span>
-                )}
-              </div>
+                </div>
 
-              <div className="td-target">
-                {isCustom ? (
-                  <div className="custom-input-group">
-                    <input
-                      type="text"
-                      className="custom-target-input"
-                      placeholder="Enter canonical target..."
-                      value={customInputs[rawVal]}
+                <div className="td-count">
+                  <span className="count-num">{count.toLocaleString()}</span>
+                  {pct && <span className="count-pct">({pct}%)</span>}
+                </div>
+
+                <div className="td-conf">
+                  {canonicalTargets.includes(rawVal) ? (
+                    <span className="conf-pill canonical">Canonical</span>
+                  ) : conf === "low" ? (
+                    <span className="conf-pill low" title="Abbreviation or initial detected — defaults to keep original">
+                      Abbreviation (low conf)
+                    </span>
+                  ) : conf === "high" ? (
+                    <span className="conf-pill high">Exact / Typo</span>
+                  ) : (
+                    <span className="conf-pill neutral">Original</span>
+                  )}
+                </div>
+
+                <div className="td-target">
+                  {isCustom ? (
+                    <div className="custom-input-group">
+                      <input
+                        type="text"
+                        className="custom-target-input"
+                        placeholder="Enter canonical target..."
+                        value={customInputs[rawVal]}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomInputs((prev) => ({ ...prev, [rawVal]: val }));
+                          onValueChange(column, rawVal, val || rawVal);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="custom-cancel-btn"
+                        onClick={() => {
+                          setCustomInputs((prev) => {
+                            const next = { ...prev };
+                            delete next[rawVal];
+                            return next;
+                          });
+                          onValueChange(column, rawVal, rawVal);
+                        }}
+                        title="Cancel custom target"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      className={`cat-target-select${currentVal !== rawVal ? " mapped" : ""}`}
+                      value={currentVal}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        setCustomInputs((prev) => ({ ...prev, [rawVal]: val }));
-                        onValueChange(column, rawVal, val || rawVal);
+                        const selected = e.target.value;
+                        if (selected === "__custom__") {
+                          setCustomInputs((prev) => ({ ...prev, [rawVal]: "" }));
+                        } else {
+                          onValueChange(column, rawVal, selected);
+                        }
                       }}
-                    />
-                    <button
-                      type="button"
-                      className="custom-cancel-btn"
-                      onClick={() => {
-                        setCustomInputs((prev) => {
-                          const next = { ...prev };
-                          delete next[rawVal];
-                          return next;
-                        });
-                        onValueChange(column, rawVal, rawVal);
-                      }}
-                      title="Cancel custom target"
                     >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <select
-                    className={`cat-target-select${currentTarget !== rawVal ? " mapped" : ""}`}
-                    value={currentTarget}
-                    onChange={(e) => {
-                      const selected = e.target.value;
-                      if (selected === "__custom__") {
-                        setCustomInputs((prev) => ({ ...prev, [rawVal]: "" }));
-                      } else {
-                        onValueChange(column, rawVal, selected);
-                      }
-                    }}
-                  >
-                    <option value={rawVal}>Keep original: "{rawVal}"</option>
-                    {canonicalTargets
-                      .filter((c) => c !== rawVal)
-                      .map((c) => (
-                        <option key={c} value={c}>
-                          Merge into: "{c}"
+                      {/* Suggested Target or Keep Original */}
+                      {isAiSuggestedMerge ? (
+                        <>
+                          <option value={mapping[rawVal] || displayTarget}>
+                            Suggested: Merge into "{displayTarget}"
+                          </option>
+                          <option value={rawVal}>
+                            Keep original: "{rawVal}"
+                          </option>
+                        </>
+                      ) : (
+                        <option value={rawVal}>
+                          Keep original: "{rawVal}"
                         </option>
-                      ))}
-                    <option value="__custom__">+ Custom canonical group...</option>
-                  </select>
-                )}
+                      )}
+
+                      {/* If current selection is another group not equal to rawVal or displayTarget, show it */}
+                      {currentVal !== rawVal && currentVal !== displayTarget && (
+                        <option value={currentVal}>
+                          Selected: "{casePreference === "keep" ? currentVal : applyCase(currentVal)}"
+                        </option>
+                      )}
+
+                      {/* Other canonical groups under separated optgroup below divider */}
+                      {otherCanonicals.length > 0 && (
+                        <optgroup label="── Reassign to a different group ──">
+                          {otherCanonicals.map((c) => {
+                            const display = casePreference === "keep" ? c : applyCase(c);
+                            return (
+                              <option key={c} value={c}>
+                                Reassign to: "{display}"
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+
+                      <option value="__custom__">+ Custom canonical group...</option>
+                    </select>
+                  )}
+                </div>
               </div>
+            );
+          })}
+        </div>
+
+        {extraIssues.length > 0 && (
+          <div className="card-extra-issues">
+            <div className="card-extra-title">Additional Fixes for '{column}'</div>
+            <div className="structural-list">
+              {extraIssues.map((s) => {
+                const isChecked = selectedStructuralIds ? selectedStructuralIds.has(s.id) : false;
+                return (
+                  <label className={`structural-row${isChecked ? " selected" : ""}`} key={s.id}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggleStructural && onToggleStructural(s.id)}
+                    />
+                    <div className="structural-info">
+                      <span className="structural-action">{s.action}</span>
+                      <span className="structural-desc">{s.description}</span>
+                    </div>
+                    <span className={`severity-badge ${s.severity}`}>{s.severity}</span>
+                  </label>
+                );
+              })}
             </div>
-          );
-        })}
+            {(() => {
+              const extraFlagged = [];
+              extraIssues.forEach((s) => {
+                if (Array.isArray(s.flagged_values) && s.flagged_values.length > 0) {
+                  extraFlagged.push(...s.flagged_values);
+                } else if (s.params?.raw_value !== undefined) {
+                  extraFlagged.push({
+                    row_index: s.params.row_index,
+                    raw_value: s.params.raw_value,
+                    suggested_value: s.params.suggested_value,
+                    reason: s.params.reason || s.description,
+                  });
+                }
+              });
+              if (extraFlagged.length > 0) {
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <FixIndividualValuesSection
+                      column={column}
+                      flaggedItems={extraFlagged}
+                      manualOverrides={manualOverrides}
+                      onSaveOverride={onSaveOverride}
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function CleanColumnCard({ column, inferredType }) {
+  return (
+    <div className="review-accordion clean-column-card">
+      <div className="clean-card-header">
+        <div className="review-summary-left">
+          <span className="clean-check-icon">✓</span>
+          <span className="review-summary-title">{column}</span>
+          {inferredType && <span className="clean-type-badge">{inferredType}</span>}
+        </div>
+        <div className="review-summary-right">
+          <span className="clean-verified-badge">✓ Verified clean — no issues detected</span>
+        </div>
       </div>
     </div>
   );
 }
 
-function StructuralReviewList({ suggestions = [], selectedIds, onToggle }) {
-  if (suggestions.length === 0) return null;
+function FixIndividualValuesSection({
+  column,
+  flaggedItems = [],
+  manualOverrides = {},
+  onSaveOverride,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [drafts, setDrafts] = useState({});
+  const [appliedKeys, setAppliedKeys] = useState(new Set());
+
+  if (!flaggedItems || flaggedItems.length === 0) return null;
+
+  const handleDraftChange = (key, val) => {
+    setDrafts((prev) => ({ ...prev, [key]: val }));
+  };
+
+  const handleApplyRow = (key) => {
+    const item = flaggedItems.find(
+      (f) =>
+        (f.row_index !== undefined ? String(f.row_index) : String(f.raw_value)) ===
+        String(key)
+    );
+    const val =
+      drafts[key] !== undefined
+        ? drafts[key]
+        : item?.suggested_value !== undefined
+        ? String(item.suggested_value)
+        : "";
+    if (onSaveOverride) {
+      onSaveOverride(column, { [key]: val });
+    }
+    setAppliedKeys((prev) => new Set(prev).add(key));
+  };
+
+  const handleApplyAll = () => {
+    const overrides = {};
+    flaggedItems.forEach((f) => {
+      const key =
+        f.row_index !== undefined ? String(f.row_index) : String(f.raw_value);
+      overrides[key] =
+        drafts[key] !== undefined
+          ? drafts[key]
+          : f.suggested_value !== undefined
+          ? String(f.suggested_value)
+          : "";
+    });
+    if (onSaveOverride) {
+      onSaveOverride(column, overrides);
+    }
+    setAppliedKeys(new Set(Object.keys(overrides)));
+  };
+
+  const appliedCount = Object.keys(manualOverrides).length;
 
   return (
-    <div className="structural-review-section">
-      <div className="structural-header">
-        <span className="structural-title">Data Quality & Structural Fixes</span>
-        <span className="structural-subtitle">
-          Missing value imputations, outlier filtering, numeric coercion, etc.
+    <div className="fix-individual-container">
+      <button
+        type="button"
+        className={`fix-individual-toggle-btn${isOpen ? " open" : ""}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className="fix-toggle-title">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              marginRight: 6,
+              transform: isOpen ? "rotate(90deg)" : "none",
+              transition: "transform 0.2s",
+            }}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          Fix individual values ({flaggedItems.length})
         </span>
-      </div>
+        {appliedCount > 0 && (
+          <span className="fix-applied-badge">
+            {appliedCount} fix{appliedCount !== 1 ? "es" : ""} staged
+          </span>
+        )}
+      </button>
 
-      <div className="structural-list">
-        {suggestions.map((s) => {
-          const isChecked = selectedIds.has(s.id);
+      {isOpen && (
+        <div className="fix-individual-body">
+          <div className="fix-individual-table">
+            <div className="fix-table-header">
+              <span>Raw Value</span>
+              <span>Issue / Reason</span>
+              <span>Suggested / New Value</span>
+              <span>Action</span>
+            </div>
+            {flaggedItems.map((item, idx) => {
+              const key =
+                item.row_index !== undefined
+                  ? String(item.row_index)
+                  : String(item.raw_value);
+              const currentVal =
+                drafts[key] !== undefined
+                  ? drafts[key]
+                  : manualOverrides[key] !== undefined
+                  ? manualOverrides[key]
+                  : item.suggested_value !== undefined
+                  ? String(item.suggested_value)
+                  : String(item.raw_value || "");
+              const isApplied =
+                manualOverrides[key] !== undefined || appliedKeys.has(key);
+
+              return (
+                <div className="fix-table-row" key={idx}>
+                  <div className="fix-td-raw">
+                    <span className="fix-raw-chip" title={String(item.raw_value)}>
+                      {String(item.raw_value)}
+                    </span>
+                    {item.row_index !== undefined && (
+                      <span className="fix-row-idx">Row #{item.row_index + 1}</span>
+                    )}
+                  </div>
+                  <div className="fix-td-reason">
+                    <span className="fix-reason-text">
+                      {item.reason || "Flagged quality issue"}
+                    </span>
+                  </div>
+                  <div className="fix-td-input">
+                    <input
+                      type="text"
+                      className="fix-input-field"
+                      value={currentVal}
+                      onChange={(e) => handleDraftChange(key, e.target.value)}
+                      placeholder="Enter correction..."
+                    />
+                  </div>
+                  <div className="fix-td-action">
+                    <button
+                      type="button"
+                      className={`fix-apply-btn${isApplied ? " applied" : ""}`}
+                      onClick={() => handleApplyRow(key)}
+                    >
+                      {isApplied ? "✓ Applied" : "Apply Fix"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {flaggedItems.length > 1 && (
+            <div className="fix-individual-footer">
+              <button
+                type="button"
+                className="fix-apply-all-btn"
+                onClick={handleApplyAll}
+              >
+                Apply All {flaggedItems.length} Fixes
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ColumnStructuralCard({
+  column,
+  inferredType,
+  issues = [],
+  selectedIds,
+  onToggle,
+  manualOverrides = {},
+  onSaveOverride,
+}) {
+  const flaggedItems = [];
+  issues.forEach((s) => {
+    if (Array.isArray(s.flagged_values) && s.flagged_values.length > 0) {
+      flaggedItems.push(...s.flagged_values);
+    } else if (s.params?.raw_value !== undefined) {
+      flaggedItems.push({
+        row_index: s.params.row_index,
+        raw_value: s.params.raw_value,
+        suggested_value: s.params.suggested_value,
+        reason: s.params.reason || s.description,
+      });
+    }
+  });
+
+  return (
+    <details className="review-accordion structural-accordion" open>
+      <summary>
+        <div className="review-summary-left">
+          <span className="review-summary-title">{column}</span>
+          <span className="review-summary-badge structural-badge">
+            {issues.length} fix{issues.length > 1 ? "es" : ""}
+          </span>
+          {inferredType && <span className="clean-type-badge">{inferredType}</span>}
+        </div>
+        <span className="review-summary-right">
+          {issues.map((i) => i.action).join(" · ")}
+        </span>
+      </summary>
+
+      <div className="review-accordion-body structural-card-body">
+        <div className="structural-list" style={{ padding: "10px 14px" }}>
+          {issues.map((s) => {
+            const isChecked = selectedIds ? selectedIds.has(s.id) : false;
+            return (
+              <label className={`structural-row${isChecked ? " selected" : ""}`} key={s.id}>
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => onToggle && onToggle(s.id)}
+                />
+                <div className="structural-info">
+                  <span className="structural-action">{s.action}</span>
+                  <span className="structural-desc">{s.description}</span>
+                </div>
+                <span className={`severity-badge ${s.severity}`}>{s.severity}</span>
+              </label>
+            );
+          })}
+        </div>
+
+        {flaggedItems.length > 0 && (
+          <div style={{ padding: "0 14px 12px 14px" }}>
+            <FixIndividualValuesSection
+              column={column}
+              flaggedItems={flaggedItems}
+              manualOverrides={manualOverrides}
+              onSaveOverride={onSaveOverride}
+            />
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function DatasetIssuesCard({ issues = [], selectedIds, onToggle }) {
+  if (!issues || issues.length === 0) return null;
+  return (
+    <div className="review-accordion dataset-issues-card">
+      <div className="dataset-issues-header">
+        <div className="review-summary-left">
+          <span className="review-summary-title">Dataset-Level Operations</span>
+          <span className="review-summary-badge">{issues.length} fix{issues.length > 1 ? "es" : ""}</span>
+        </div>
+      </div>
+      <div className="structural-list" style={{ padding: "10px 14px" }}>
+        {issues.map((s) => {
+          const isChecked = selectedIds ? selectedIds.has(s.id) : false;
           return (
             <label className={`structural-row${isChecked ? " selected" : ""}`} key={s.id}>
               <input
                 type="checkbox"
                 checked={isChecked}
-                onChange={() => onToggle(s.id)}
+                onChange={() => onToggle && onToggle(s.id)}
               />
               <div className="structural-info">
                 <span className="structural-action">{s.action}</span>
@@ -1055,6 +1663,8 @@ export default function App() {
 
   // Suggestions & cleaning pipeline state
   const [suggestions, setSuggestions] = useState([]);
+  const [columnResults, setColumnResults] = useState([]);
+  const [datasetIssues, setDatasetIssues] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [manualMappings, setManualMappings] = useState({});
   const [selectedStructuralIds, setSelectedStructuralIds] = useState(new Set());
@@ -1073,13 +1683,31 @@ export default function App() {
   // Steps override — set when chat proposes an action that we want to apply.
   const [chatPendingSteps, setChatPendingSteps] = useState(null);
 
+  // Per-column case preference: { [columnName]: "keep" | "upper" | "title" | "lower" }
+  const [casePreferences, setCasePreferences] = useState({});
+
+  // Per-column date format preference: { [columnName]: "YYYY-MM-DD" | "DD-MM-YYYY" | ... }
+  const [dateFormatPreferences, setDateFormatPreferences] = useState({});
+
+  // Per-column confirmed ambiguous dates: { [columnName]: { [rawValue]: "dayfirst" | "monthfirst" } }
+  const [confirmedAmbiguousDates, setConfirmedAmbiguousDates] = useState({});
+
+  // Per-column manual value overrides: { [columnName]: { [rowIndexOrRaw]: newValue } }
+  const [manualValueOverrides, setManualValueOverrides] = useState({});
+
   const handleFile = async (file) => {
     setLoading(true);
     setError(null);
     setCleaningResult(null);
     setCleaningError(null);
     setSuggestions([]);
+    setColumnResults([]);
+    setDatasetIssues([]);
     setManualMappings({});
+    setManualValueOverrides({});
+    setCasePreferences({});
+    setDateFormatPreferences({});
+    setConfirmedAmbiguousDates({});
     setSelectedStructuralIds(new Set());
 
     try {
@@ -1099,43 +1727,86 @@ export default function App() {
   const fetchSuggestions = async (datasetId) => {
     setSuggestionsLoading(true);
     try {
-      const list = await getSuggestions(datasetId);
-      setSuggestions(list);
+      const resp = await getSuggestions(datasetId);
+      const colResults = Array.isArray(resp) ? [] : (resp.column_results || []);
+      const dsIssues = Array.isArray(resp) ? [] : (resp.dataset_issues || []);
+      const flatList = Array.isArray(resp) ? resp : (resp.suggestions || []);
 
-      // Initialize manualMappings for categorical columns
+      setSuggestions(flatList);
+      setColumnResults(colResults);
+      setDatasetIssues(dsIssues);
+
+      // Initialize manualMappings for categorical columns and date prefs
       const initMappings = {};
-      list.forEach((s) => {
-        if (s.action === "standardize_category") {
-          const col = s.params?.column;
-          const dv = s.params?.distinct_values || {};
-          const aiMapping = s.params?.mapping || {};
-          const confidences = s.params?.variant_confidences || {};
-          if (col) {
-            initMappings[col] = {};
-            Object.keys(dv).forEach((val) => {
-              // High-confidence exact/typo variants default to AI recommendation.
-              // Low-confidence abbreviations default to self (keep original / unmerged).
-              if (confidences[val] === "high" && aiMapping[val]) {
-                initMappings[col][val] = aiMapping[val];
-              } else {
-                initMappings[col][val] = val;
-              }
-            });
+      const initDatePrefs = {};
+      const structDefaults = new Set();
+
+      colResults.forEach((col) => {
+        if (col.categorical_analysis) {
+          const ca = col.categorical_analysis;
+          const dv = ca.distinct_values || {};
+          const aiMapping = ca.mapping || {};
+          const confidences = ca.variant_confidences || {};
+          initMappings[col.name] = {};
+          Object.keys(dv).forEach((val) => {
+            if (confidences[val] === "high" && aiMapping[val]) {
+              initMappings[col.name][val] = aiMapping[val];
+            } else {
+              initMappings[col.name][val] = val;
+            }
+          });
+        }
+
+        if (col.date_analysis) {
+          initDatePrefs[col.name] = col.date_analysis.default_target_format || "YYYY-MM-DD";
+        }
+
+        (col.issues || []).forEach((issue) => {
+          if (issue.action !== "standardize_category" && issue.action !== "standardize_date_format") {
+            if (issue.severity === "high" || issue.severity === "medium") {
+              structDefaults.add(issue.id);
+            }
           }
+        });
+      });
+
+      dsIssues.forEach((issue) => {
+        if (issue.severity === "high" || issue.severity === "medium") {
+          structDefaults.add(issue.id);
         }
       });
-      setManualMappings(initMappings);
 
-      // Checked by default for high and medium severity structural issues
-      const structDefaults = new Set(
-        list
-          .filter(
-            (s) =>
-              s.action !== "standardize_category" &&
-              (s.severity === "high" || s.severity === "medium")
-          )
-          .map((s) => s.id)
-      );
+      // Fallback if colResults was empty (e.g. mock response)
+      if (colResults.length === 0) {
+        flatList.forEach((s) => {
+          if (s.action === "standardize_category") {
+            const col = s.params?.column;
+            const dv = s.params?.distinct_values || {};
+            const aiMapping = s.params?.mapping || {};
+            const confidences = s.params?.variant_confidences || {};
+            if (col) {
+              initMappings[col] = {};
+              Object.keys(dv).forEach((val) => {
+                if (confidences[val] === "high" && aiMapping[val]) {
+                  initMappings[col][val] = aiMapping[val];
+                } else {
+                  initMappings[col][val] = val;
+                }
+              });
+            }
+          } else if (s.action === "standardize_date_format") {
+            const col = s.params?.column;
+            if (col) {
+              initDatePrefs[col] = s.params?.default_target_format || "YYYY-MM-DD";
+            }
+          } else if (s.severity === "high" || s.severity === "medium") {
+            structDefaults.add(s.id);
+          }
+        });
+      }
+
+      setManualMappings(initMappings);
+      setDateFormatPreferences(initDatePrefs);
       setSelectedStructuralIds(structDefaults);
     } catch (err) {
       setCleaningError(`Could not load suggestions: ${err.message}`);
@@ -1150,6 +1821,62 @@ export default function App() {
       [column]: {
         ...(prev[column] || {}),
         [rawVal]: targetVal,
+      },
+    }));
+  };
+
+  /** When the user picks a case style for a column, update all mapping targets */
+  const handleCaseChange = (column, caseKey) => {
+    setCasePreferences((prev) => ({ ...prev, [column]: caseKey }));
+
+    // If switching away from "keep", apply the case transform to all
+    // non-identity mapping targets so the pipeline step uses cased targets
+    if (caseKey !== "keep") {
+      setManualMappings((prev) => {
+        const colMap = { ...(prev[column] || {}) };
+        const toCase = (s) => {
+          if (!s) return s;
+          switch (caseKey) {
+            case "upper": return s.toUpperCase();
+            case "lower": return s.toLowerCase();
+            case "title": return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+            default: return s;
+          }
+        };
+        Object.keys(colMap).forEach((rawVal) => {
+          const target = colMap[rawVal];
+          // Only transform if the target isn't the raw value itself (i.e. it's a merge)
+          if (target && target !== rawVal) {
+            colMap[rawVal] = toCase(target);
+          }
+        });
+        return { ...prev, [column]: colMap };
+      });
+    }
+  };
+
+  const handleDateFormatChange = (column, formatKey) => {
+    setDateFormatPreferences((prev) => ({ ...prev, [column]: formatKey }));
+  };
+
+  const handleConfirmAmbiguousDate = (column, rawVal, interpretation) => {
+    setConfirmedAmbiguousDates((prev) => {
+      const colMap = { ...(prev[column] || {}) };
+      if (!interpretation) {
+        delete colMap[rawVal];
+      } else {
+        colMap[rawVal] = interpretation;
+      }
+      return { ...prev, [column]: colMap };
+    });
+  };
+
+  const handleSaveOverride = (column, overridesForCol) => {
+    setManualValueOverrides((prev) => ({
+      ...prev,
+      [column]: {
+        ...(prev[column] || {}),
+        ...overridesForCol,
       },
     }));
   };
@@ -1169,7 +1896,19 @@ export default function App() {
   const _buildApprovedSteps = () => {
     const steps = [];
 
-    // 1. Categorical standardize steps from user manual mappings
+    // 1a. Per-column normalize_case steps (must run BEFORE standardize_category)
+    Object.entries(casePreferences).forEach(([col, casePref]) => {
+      if (casePref && casePref !== "keep") {
+        steps.push({
+          action: "normalize_case",
+          params: { column: col, case: casePref },
+          description: `Normalize '${col}' to ${casePref === "upper" ? "UPPERCASE" : casePref === "title" ? "Title Case" : "lowercase"}`,
+          severity: "low",
+        });
+      }
+    });
+
+    // 1b. Categorical standardize steps from user manual mappings
     Object.entries(manualMappings).forEach(([col, valMap]) => {
       const mapping = {};
       Object.entries(valMap).forEach(([rawVal, target]) => {
@@ -1187,17 +1926,140 @@ export default function App() {
       }
     });
 
-    // 2. Structural steps
-    suggestions
-      .filter((s) => s.action !== "standardize_category" && selectedStructuralIds.has(s.id))
-      .forEach((s) => {
-        steps.push({
-          action: s.action,
-          params: s.params,
-          description: s.description,
-          severity: s.severity,
-        });
+    // 1c. Date format standardize steps
+    if (columnResults.length > 0) {
+      columnResults.forEach((col) => {
+        if (col.date_analysis) {
+          const colName = col.name;
+          const targetFormat = dateFormatPreferences[colName] || col.date_analysis.default_target_format || "YYYY-MM-DD";
+          const dateItems = col.date_analysis.date_items || [];
+          const colConfirmed = confirmedAmbiguousDates[colName] || {};
+
+          const valueMap = {};
+          dateItems.forEach((item) => {
+            const rawVal = item.raw;
+            if (item.ambiguous) {
+              const userChoice = colConfirmed[rawVal];
+              if (userChoice) {
+                const target =
+                  userChoice === "monthfirst" && item.alt_formats?.[targetFormat]
+                    ? item.alt_formats[targetFormat]
+                    : item.formats?.[targetFormat];
+                if (target) {
+                  valueMap[rawVal] = target;
+                }
+              }
+            } else {
+              const target = item.formats?.[targetFormat];
+              if (target) {
+                valueMap[rawVal] = target;
+              }
+            }
+          });
+
+          if (Object.keys(valueMap).length > 0) {
+            steps.push({
+              action: "standardize_date_format",
+              params: {
+                column: colName,
+                target_format: targetFormat,
+                value_map: valueMap,
+              },
+              description: `Standardize date formats in '${colName}' to ${targetFormat} (${Object.keys(valueMap).length} date(s))`,
+              severity: "medium",
+            });
+          }
+        }
       });
+    } else {
+      suggestions
+        .filter((s) => s.action === "standardize_date_format")
+        .forEach((s) => {
+          const col = s.params?.column;
+          const targetFormat = dateFormatPreferences[col] || s.params?.default_target_format || "YYYY-MM-DD";
+          const dateItems = s.params?.date_items || [];
+          const colConfirmed = confirmedAmbiguousDates[col] || {};
+
+          const valueMap = {};
+          dateItems.forEach((item) => {
+            const rawVal = item.raw;
+            if (item.ambiguous) {
+              const userChoice = colConfirmed[rawVal];
+              if (userChoice) {
+                const target =
+                  userChoice === "monthfirst" && item.alt_formats?.[targetFormat]
+                    ? item.alt_formats[targetFormat]
+                    : item.formats?.[targetFormat];
+                if (target) {
+                  valueMap[rawVal] = target;
+                }
+              }
+            } else {
+              const target = item.formats?.[targetFormat];
+              if (target) {
+                valueMap[rawVal] = target;
+              }
+            }
+          });
+
+          if (Object.keys(valueMap).length > 0) {
+            steps.push({
+              action: "standardize_date_format",
+              params: {
+                column: col,
+                target_format: targetFormat,
+                value_map: valueMap,
+              },
+              description: `Standardize date formats in '${col}' to ${targetFormat} (${Object.keys(valueMap).length} date(s))`,
+              severity: "medium",
+            });
+          }
+        });
+    }
+
+    // 2. Structural steps from column issues and dataset issues
+    const allStructuralIssues = [
+      ...datasetIssues,
+      ...columnResults.flatMap((c) => c.issues || []),
+    ];
+    const sourceIssues = allStructuralIssues.length > 0
+      ? allStructuralIssues
+      : suggestions.filter((s) => s.action !== "standardize_category" && s.action !== "standardize_date_format");
+
+    sourceIssues.forEach((s) => {
+      if (
+        s.action !== "standardize_category" &&
+        s.action !== "standardize_date_format" &&
+        selectedStructuralIds.has(s.id)
+      ) {
+        if (!steps.some((existing) => existing.action === s.action && JSON.stringify(existing.params) === JSON.stringify(s.params))) {
+          steps.push({
+            action: s.action,
+            params: s.params,
+            description: s.description,
+            severity: s.severity,
+          });
+        }
+      }
+    });
+
+    // 3. Manual value overrides (Phase 6)
+    Object.entries(manualValueOverrides).forEach(([col, overrides]) => {
+      const cleanOverrides = {};
+      Object.entries(overrides).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && String(v).trim() !== "") {
+          cleanOverrides[k] = v;
+        }
+      });
+      if (Object.keys(cleanOverrides).length > 0) {
+        steps.push({
+          action: "manual_value_override",
+          params: { column: col, overrides: cleanOverrides },
+          description: `Manual value override on '${col}' (${Object.keys(cleanOverrides).length} value(s))`,
+          severity: "medium",
+        });
+      }
+    });
 
     return steps;
   };
@@ -1272,7 +2134,13 @@ export default function App() {
   const resetAll = () => {
     setReport(null);
     setSuggestions([]);
+    setColumnResults([]);
+    setDatasetIssues([]);
     setManualMappings({});
+    setManualValueOverrides({});
+    setCasePreferences({});
+    setDateFormatPreferences({});
+    setConfirmedAmbiguousDates({});
     setSelectedStructuralIds(new Set());
     setCleaningResult(null);
     setCleaningError(null);
@@ -1284,10 +2152,6 @@ export default function App() {
 
   const displayReport = report;
 
-  // Separate suggestions
-  const categoricalSuggestions = suggestions.filter((s) => s.action === "standardize_category");
-  const structuralSuggestions = suggestions.filter((s) => s.action !== "standardize_category");
-
   // Calculate count of remapped values
   const totalRemappedValues = Object.values(manualMappings).reduce((acc, valMap) => {
     return (
@@ -1295,6 +2159,26 @@ export default function App() {
       Object.entries(valMap).filter(([k, v]) => v && v !== k && v !== "(keep as-is)").length
     );
   }, 0);
+
+  const totalManualOverrides = Object.values(manualValueOverrides).reduce((acc, colOverrides) => {
+    return acc + Object.keys(colOverrides || {}).length;
+  }, 0);
+
+  const totalCaseChanges = Object.values(casePreferences).filter((v) => v && v !== "keep").length;
+
+  const totalDateTransforms = columnResults.reduce((acc, col) => {
+    if (!col.date_analysis) return acc;
+    const colName = col.name;
+    const dateItems = col.date_analysis.date_items || [];
+    const colConfirmed = confirmedAmbiguousDates[colName] || {};
+    const count = dateItems.filter(
+      (it) => !it.ambiguous || colConfirmed[it.raw] !== undefined
+    ).length;
+    return acc + count;
+  }, 0);
+
+  const cleanColumnCount = columnResults.filter((c) => c.status === "clean").length;
+  const issueColumnCount = columnResults.filter((c) => c.status === "has_issues").length;
 
   return (
     <div className="page">
@@ -1340,50 +2224,120 @@ export default function App() {
             <div className="ledger-header">Review & Standardize Values</div>
             {suggestionsLoading ? (
               <div className="loading-note">Analyzing cleaning rules & category groupings…</div>
-            ) : suggestions.length === 0 ? (
+            ) : columnResults.length === 0 && suggestions.length === 0 ? (
               <div className="clean-note">No automated cleaning issues detected. Your data looks good!</div>
             ) : (
-              <div className="manual-review-scroll-container smooth-expand">
-                <div className="manual-review-body">
-                  {/* Categorical per-column review cards */}
-                  {categoricalSuggestions.map((s) => {
-                    const col = s.params?.column;
-                    return (
-                      <CategoricalReviewCard
-                        key={s.id}
-                        column={col}
-                        distinctValues={s.params?.distinct_values || {}}
-                        variantConfidences={s.params?.variant_confidences || {}}
-                        groups={s.params?.groups || []}
-                        mapping={manualMappings[col] || {}}
-                        totalRows={displayReport.row_count || 0}
-                        onValueChange={handleMappingChange}
-                      />
-                    );
-                  })}
-
-                  {/* Structural suggestions checklist */}
-                  <StructuralReviewList
-                    suggestions={structuralSuggestions}
+              <div className="review-section-scroll">
+                {/* Dataset-level operations (e.g. drop duplicates) */}
+                {datasetIssues.length > 0 && (
+                  <DatasetIssuesCard
+                    issues={datasetIssues}
                     selectedIds={selectedStructuralIds}
                     onToggle={toggleStructuralSuggestion}
                   />
-                </div>
+                )}
 
-                {/* Sticky footer at the bottom of the review container */}
-                <div className="manual-review-footer">
-                  <div className="manual-review-summary">
-                    {categoricalSuggestions.length > 0 && (
-                      <span>
-                        {categoricalSuggestions.length} column{categoricalSuggestions.length > 1 ? "s" : ""} (
-                        {totalRemappedValues} value{totalRemappedValues !== 1 ? "s" : ""} remapped)
-                      </span>
+                {/* Exactly N column cards in original file order */}
+                {columnResults.map((col) => {
+                  if (col.status === "clean" || col.card_type === "clean") {
+                    return (
+                      <CleanColumnCard
+                        key={col.name}
+                        column={col.name}
+                        inferredType={col.inferred_type}
+                      />
+                    );
+                  }
+
+                  if (col.card_type === "date" && col.date_analysis) {
+                    const extraIssues = (col.issues || []).filter(
+                      (i) => i.action !== "standardize_date_format"
+                    );
+                    return (
+                      <DateReviewCard
+                        key={col.name}
+                        column={col.name}
+                        dateItems={col.date_analysis.date_items || []}
+                        totalRows={displayReport.row_count || 0}
+                        selectedStyle={
+                          dateFormatPreferences[col.name] ||
+                          col.date_analysis.default_target_format ||
+                          "YYYY-MM-DD"
+                        }
+                        onStyleChange={handleDateFormatChange}
+                        confirmedAmbiguous={confirmedAmbiguousDates[col.name] || {}}
+                        onConfirmAmbiguous={handleConfirmAmbiguousDate}
+                        extraIssues={extraIssues}
+                        selectedStructuralIds={selectedStructuralIds}
+                        onToggleStructural={toggleStructuralSuggestion}
+                        manualOverrides={manualValueOverrides[col.name] || {}}
+                        onSaveOverride={handleSaveOverride}
+                      />
+                    );
+                  }
+
+                  if (col.card_type === "categorical" && col.categorical_analysis) {
+                    const extraIssues = (col.issues || []).filter(
+                      (i) => i.action !== "standardize_category"
+                    );
+                    return (
+                      <CategoricalReviewCard
+                        key={col.name}
+                        column={col.name}
+                        distinctValues={col.categorical_analysis.distinct_values || {}}
+                        variantConfidences={col.categorical_analysis.variant_confidences || {}}
+                        groups={col.categorical_analysis.groups || []}
+                        mapping={manualMappings[col.name] || {}}
+                        totalRows={displayReport.row_count || 0}
+                        onValueChange={handleMappingChange}
+                        casePreference={casePreferences[col.name] || "keep"}
+                        onCaseChange={handleCaseChange}
+                        extraIssues={extraIssues}
+                        selectedStructuralIds={selectedStructuralIds}
+                        onToggleStructural={toggleStructuralSuggestion}
+                        manualOverrides={manualValueOverrides[col.name] || {}}
+                        onSaveOverride={handleSaveOverride}
+                      />
+                    );
+                  }
+
+                  // Structural / Numeric column issues
+                  return (
+                    <ColumnStructuralCard
+                      key={col.name}
+                      column={col.name}
+                      inferredType={col.inferred_type}
+                      issues={col.issues || []}
+                      selectedIds={selectedStructuralIds}
+                      onToggle={toggleStructuralSuggestion}
+                      manualOverrides={manualValueOverrides[col.name] || {}}
+                      onSaveOverride={handleSaveOverride}
+                    />
+                  );
+                })}
+
+                {/* Footer — normal document flow */}
+                <div className="review-footer">
+                  <div className="review-footer-summary">
+                    <span>
+                      {columnResults.length} columns scanned
+                      {issueColumnCount > 0 ? ` · ${issueColumnCount} with issues` : ""}
+                      {cleanColumnCount > 0 ? ` · ${cleanColumnCount} verified clean` : ""}
+                    </span>
+                    {totalDateTransforms > 0 && (
+                      <span> · {totalDateTransforms} date{totalDateTransforms !== 1 ? "s" : ""} standardized</span>
                     )}
-                    {categoricalSuggestions.length > 0 && structuralSuggestions.length > 0 && (
-                      <span> · </span>
+                    {totalRemappedValues > 0 && (
+                      <span> · {totalRemappedValues} value{totalRemappedValues !== 1 ? "s" : ""} remapped</span>
                     )}
-                    {structuralSuggestions.length > 0 && (
-                      <span>{selectedStructuralIds.size} structural fix{selectedStructuralIds.size !== 1 ? "es" : ""} selected</span>
+                    {totalCaseChanges > 0 && (
+                      <span> · {totalCaseChanges} case styled</span>
+                    )}
+                    {selectedStructuralIds.size > 0 && (
+                      <span> · {selectedStructuralIds.size} structural fix{selectedStructuralIds.size !== 1 ? "es" : ""} selected</span>
+                    )}
+                    {totalManualOverrides > 0 && (
+                      <span> · {totalManualOverrides} manual override{totalManualOverrides !== 1 ? "s" : ""} staged</span>
                     )}
                   </div>
 
@@ -1393,7 +2347,11 @@ export default function App() {
                     onClick={handlePreview}
                     disabled={
                       previewLoading ||
-                      (totalRemappedValues === 0 && selectedStructuralIds.size === 0)
+                      (totalRemappedValues === 0 &&
+                        selectedStructuralIds.size === 0 &&
+                        totalCaseChanges === 0 &&
+                        totalDateTransforms === 0 &&
+                        totalManualOverrides === 0)
                     }
                   >
                     {previewLoading ? "Generating preview…" : "Apply all changes"}

@@ -332,9 +332,13 @@ class TestEndpointIntegration(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
             res = self.client.get(f"/datasets/{dataset_id}/suggestions")
         self.assertEqual(res.status_code, 200)
-        suggestions = res.json()
-        self.assertIsInstance(suggestions, list)
-        self.assertGreater(len(suggestions), 0)
+        data = res.json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("column_results", data)
+        self.assertIsInstance(data["column_results"], list)
+        self.assertGreater(len(data["column_results"]), 0)
+        self.assertIn("suggestions", data)
+        self.assertIsInstance(data["suggestions"], list)
 
     def test_suggestions_endpoint_fallback_when_key_empty(self):
         """With empty key, endpoint must still return valid suggestions (rule-based)."""
@@ -342,13 +346,13 @@ class TestEndpointIntegration(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
             res = self.client.get(f"/datasets/{dataset_id}/suggestions")
         self.assertEqual(res.status_code, 200)
-        suggestions = res.json()
+        data = res.json()
+        self.assertEqual(data.get("source"), "rule_based_fallback")
+        suggestions = data.get("suggestions", [])
         # All suggestions from fallback must be actionable
         for s in suggestions:
             self.assertIn("action", s)
             self.assertIn(s["action"], ALLOWED_OPERATIONS)
-            # source field should say rule_based_fallback
-            self.assertEqual(s.get("source"), "rule_based_fallback")
 
     def test_pipeline_still_applies_after_ai_suggestions(self):
         """Verify the full pipeline still works end-to-end with AI-derived suggestions."""
@@ -365,5 +369,54 @@ class TestEndpointIntegration(unittest.TestCase):
         self.assertIn("cleaned_profile", apply_res.json())
 
 
+class TestDateFormatStandardization(unittest.TestCase):
+    def test_analyze_date_column_ambiguity_and_formats(self):
+        from app.ai_suggestions import _analyze_date_column
+        series = pd.Series([
+            "10-09-2026", "2026/09/08", "7 Sep 2026", "06-09-2026", "29/08/2026"
+        ], name="Date")
+        res = _analyze_date_column(series, "Date")
+        items_by_raw = {it["raw"]: it for it in res["date_items"]}
+
+        # 06-09-2026 should be ambiguous (day and month <= 12)
+        self.assertTrue(items_by_raw["06-09-2026"]["ambiguous"])
+        self.assertEqual(items_by_raw["06-09-2026"]["formats"]["YYYY-MM-DD"], "2026-09-06")
+        self.assertEqual(items_by_raw["06-09-2026"]["formats"]["DD-MM-YYYY"], "06-09-2026")
+
+        # 29/08/2026 should be unambiguous (29 > 12)
+        self.assertFalse(items_by_raw["29/08/2026"]["ambiguous"])
+        self.assertEqual(items_by_raw["29/08/2026"]["formats"]["YYYY-MM-DD"], "2026-08-29")
+        self.assertEqual(items_by_raw["29/08/2026"]["formats"]["DD-MM-YYYY"], "29-08-2026")
+
+        # 7 Sep 2026 should be unambiguous (named month)
+        self.assertFalse(items_by_raw["7 Sep 2026"]["ambiguous"])
+        self.assertEqual(items_by_raw["7 Sep 2026"]["formats"]["YYYY-MM-DD"], "2026-09-07")
+
+    def test_apply_pipeline_standardize_date_format(self):
+        from app.cleaning import apply_pipeline
+        df = pd.DataFrame({
+            "Date": ["2026/09/08", "7 Sep 2026", "29/08/2026"],
+            "City": ["Bangalore", "Bengaluru", "bangalore"],
+        })
+        steps = [{
+            "action": "standardize_date_format",
+            "params": {
+                "column": "Date",
+                "target_format": "DD-MM-YYYY",
+                "value_map": {
+                    "2026/09/08": "08-09-2026",
+                    "7 Sep 2026": "07-09-2026",
+                    "29/08/2026": "29-08-2026",
+                }
+            },
+            "description": "Standardize dates to DD-MM-YYYY",
+        }]
+        cleaned_df, log = apply_pipeline(df, steps)
+        self.assertEqual(cleaned_df["Date"].tolist(), ["08-09-2026", "07-09-2026", "29-08-2026"])
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["action"], "standardize_date_format")
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from google import genai
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -144,7 +144,7 @@ def get_profile(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any
 
 
 @app.get("/datasets/{dataset_id}/suggestions")
-def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     df = DATASETS.get(dataset_id)
     if df is None:
         profile = get_profile(dataset_id, db)
@@ -157,27 +157,27 @@ def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> list[dict
         profile = profile_dataframe(df)
 
     result = generate_ai_suggestions(df, profile)
-    # Attach general_notes and source as extra metadata so callers can inspect
-    # which path ran; the suggestions list shape is unchanged for the frontend.
-    suggestions = result["suggestions"]
-    for sug in suggestions:
-        sug.setdefault("general_notes", result["general_notes"])
-        sug.setdefault("source", result["source"])
-    return suggestions
+    return result
 
 
 @app.post("/datasets/{dataset_id}/pipeline")
 def save_pipeline(
-    dataset_id: str, steps: list[StepSchema], db: Session = Depends(get_db)
+    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db)
 ) -> list[dict[str, Any]]:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
 
+    if isinstance(steps, dict):
+        raw_list = steps.get("suggestions") or steps.get("steps") or []
+        step_items = [StepSchema(**s) for s in raw_list]
+    else:
+        step_items = steps
+
     db.query(PipelineStep).filter(PipelineStep.dataset_id == dataset_id).delete()
 
     created_steps = []
-    for idx, st in enumerate(steps):
+    for idx, st in enumerate(step_items):
         step_obj = PipelineStep(
             dataset_id=dataset_id,
             order=idx,
@@ -276,7 +276,7 @@ def apply_cleaning_pipeline(
 
 @app.post("/datasets/{dataset_id}/preview")
 def preview_cleaning_pipeline(
-    dataset_id: str, steps: list[StepSchema], db: Session = Depends(get_db)
+    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     """Dry-run the given steps in memory (no save, no DB write).
 
@@ -297,12 +297,18 @@ def preview_cleaning_pipeline(
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="Raw dataset file not found in storage.")
 
-    if not steps:
+    if isinstance(steps, dict):
+        raw_list = steps.get("suggestions") or steps.get("steps") or []
+        step_items = [StepSchema(**s) for s in raw_list]
+    else:
+        step_items = steps
+
+    if not step_items:
         raise HTTPException(status_code=400, detail="No steps provided for preview.")
 
     # Figure out which columns will be affected, for before-snapshot
     affected_columns: set[str] = set()
-    for step in steps:
+    for step in step_items:
         col = (step.params or {}).get("column")
         if col and col in df.columns:
             affected_columns.add(col)
@@ -415,11 +421,35 @@ def download_cleaned_dataset(
 
     fmt = format.lower()
     if fmt == "xlsx":
+        from openpyxl.utils import get_column_letter
+
         # Parse CSV bytes to DataFrame then convert to Excel
         cleaned_df = pd.read_csv(io.BytesIO(csv_bytes))
         output = io.BytesIO()
+        sheet_name = "Cleaned Data"
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            cleaned_df.to_excel(writer, index=False, sheet_name="Cleaned Data")
+            cleaned_df.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+
+            # Confirm worksheet has no protection and is completely normal/editable
+            ws.protection.disable()
+            ws.protection.sheet = False
+            try:
+                ws.views.sheetView[0].showGridLines = True
+            except Exception:  # noqa: BLE001
+                pass
+
+            # Auto-size each column's width based on content
+            for col_idx, col_name in enumerate(cleaned_df.columns, start=1):
+                col_letter = get_column_letter(col_idx)
+                header_len = len(str(col_name))
+                val_lens = [
+                    len(str(v)) for v in cleaned_df[col_name].dropna()
+                ] if not cleaned_df.empty else [0]
+                max_len = max([header_len] + val_lens) if val_lens else header_len
+                # Set width with padding (+3) and a minimum width of 12 so text is never truncated
+                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
         content = output.getvalue()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{stem}_cleaned.xlsx"

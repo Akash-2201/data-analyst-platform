@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -42,10 +43,14 @@ ALLOWED_OPERATIONS: set[str] = {
     "trim_whitespace",
     "normalize_case",
     "standardize_category",
+    "standardize_date_format",
     "coerce_numeric",
     "flag_negative_values",
     "clip_negative_to_null",
     "remove_outliers",
+    "manual_value_override",
+    "flag_invalid_email",
+    "flag_invalid_phone",
 }
 
 ALLOWED_SEVERITIES: set[str] = {"high", "medium", "low"}
@@ -103,6 +108,136 @@ def _passes_edit_distance_check(canonical: str, variant: str, confidence: str = 
         return True
     max_allowed = max(1, int(len(canon_l) * _MAX_EDIT_DISTANCE_RATIO))
     return _edit_distance(canon_l, var_l) <= max_allowed
+
+
+# ---------------------------------------------------------------------------
+# Date-format standardization helpers
+# ---------------------------------------------------------------------------
+
+DATE_STYLES = ["YYYY-MM-DD", "DD-MM-YYYY", "DD/MM/YYYY", "MM/DD/YYYY", "DD Mon YYYY"]
+
+
+def _is_datetime_column(series: pd.Series, col_meta: dict[str, Any]) -> bool:
+    """Check if a column is a date/datetime column."""
+    inferred = (col_meta.get("inferred_type") or "").lower()
+    if inferred in ("datetime", "date"):
+        return True
+    col_name = str(col_meta.get("name") or series.name or "").lower()
+    if any(k in col_name for k in ("date", "dob", "timestamp", "time")):
+        non_null = series.dropna().astype(str)
+        if not non_null.empty:
+            parsed = pd.to_datetime(non_null, errors="coerce", format="mixed")
+            if parsed.notna().mean() >= 0.4:
+                return True
+    non_null = series.dropna().astype(str)
+    if len(non_null) >= 3:
+        sample = non_null.head(50)
+        parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+        if parsed.notna().mean() >= 0.7:
+            return True
+    return False
+
+
+def _format_timestamp(ts: pd.Timestamp | None, style: str) -> str:
+    """Format a Timestamp into one of the 5 supported date styles."""
+    if ts is None or pd.isna(ts):
+        return ""
+    try:
+        if style == "YYYY-MM-DD":
+            return ts.strftime("%Y-%m-%d")
+        elif style == "DD-MM-YYYY":
+            return ts.strftime("%d-%m-%Y")
+        elif style == "DD/MM/YYYY":
+            return ts.strftime("%d/%m/%Y")
+        elif style == "MM/DD/YYYY":
+            return ts.strftime("%m/%d/%Y")
+        elif style == "DD Mon YYYY":
+            return ts.strftime("%d %b %Y")
+    except Exception:
+        return ""
+    return ts.strftime("%Y-%m-%d")
+
+
+def _analyze_date_column(series: pd.Series, col_name: str) -> dict[str, Any]:
+    """
+    Parse distinct values in a date column, detect ambiguity, and precompute style formats.
+    Returns metadata required for format-selector UI and standardize_date_format operation.
+    """
+    non_null = series.dropna().astype(str)
+    val_counts = non_null.value_counts()
+    distinct_values = {str(k): int(v) for k, v in val_counts.items()}
+
+    items = []
+    for raw_val, count in val_counts.items():
+        s = str(raw_val).strip()
+        if not s:
+            continue
+
+        has_month_name = bool(re.search(r"[a-zA-Z]", s))
+        year_first = bool(re.match(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}", s))
+
+        dt_df = None
+        dt_mf = None
+        try:
+            dt_df = pd.to_datetime(s, dayfirst=True, format="mixed")
+        except Exception:
+            pass
+        try:
+            dt_mf = pd.to_datetime(s, dayfirst=False, format="mixed")
+        except Exception:
+            pass
+
+        ambiguous = False
+        if has_month_name or year_first:
+            ambiguous = False
+            chosen_dt = dt_df or dt_mf
+        elif dt_df is not None and dt_mf is not None:
+            if dt_df != dt_mf:
+                ambiguous = True
+            chosen_dt = dt_df  # default to dayfirst as standard
+        else:
+            chosen_dt = dt_df or dt_mf
+
+        formats = {}
+        alt_formats = {}
+        if chosen_dt is not None and not pd.isna(chosen_dt):
+            for style in DATE_STYLES:
+                formats[style] = _format_timestamp(chosen_dt, style)
+        if ambiguous and dt_mf is not None and not pd.isna(dt_mf):
+            for style in DATE_STYLES:
+                alt_formats[style] = _format_timestamp(dt_mf, style)
+
+        items.append({
+            "raw": str(raw_val),
+            "count": int(count),
+            "ambiguous": ambiguous,
+            "parsed": chosen_dt is not None,
+            "formats": formats,
+            "alt_formats": alt_formats,
+            "dayfirst_preview": _format_timestamp(dt_df, "DD Mon YYYY") if dt_df is not None else None,
+            "monthfirst_preview": _format_timestamp(dt_mf, "DD Mon YYYY") if dt_mf is not None else None,
+        })
+
+    # Sort items by occurrence count descending
+    items.sort(key=lambda x: x["count"], reverse=True)
+
+    default_style = "YYYY-MM-DD"
+    default_map = {}
+    for item in items:
+        # Ambiguous values are excluded from default auto-apply unless user confirms
+        if not item["ambiguous"] and item["formats"].get(default_style):
+            target = item["formats"][default_style]
+            if target != item["raw"]:
+                default_map[item["raw"]] = target
+
+    return {
+        "column": col_name,
+        "distinct_values": distinct_values,
+        "date_items": items,
+        "styles": DATE_STYLES,
+        "default_map": default_map,
+        "default_style": default_style,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -451,6 +586,7 @@ OPERATION PARAMETER NOTES:
 - fill_missing: params must include "column" (str) and "strategy" (one of "median", "mean", "mode", "value")
 - normalize_case: params must include "column" (str) and "case" (one of "lower", "title", "upper")
 - standardize_category: params must include only "column" (str). DO NOT include "mapping" key.
+- standardize_date_format: params must include only "column" (str). DO NOT include "value_map" key.
 - trim_whitespace / coerce_numeric / flag_negative_values / clip_negative_to_null / remove_outliers / drop_column / drop_missing: params must include "column" (str)
 - drop_duplicates: params must be {{}}
 
@@ -482,6 +618,7 @@ def _validate_and_enrich(
     mapping_cache: dict[str, dict[str, Any]],
     ai_client: Any | None = None,
     models_to_try: list[str] | None = None,
+    date_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if models_to_try is None:
         models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
@@ -503,7 +640,30 @@ def _validate_and_enrich(
     recommended = True
     description = raw.get("description", f"Fix issue in '{column}'")
 
-    if operation == "standardize_category":
+    if operation == "standardize_date_format":
+        cached = date_cache.get(column) if date_cache else None
+        if cached is None and column in df.columns:
+            cached = _analyze_date_column(df[column], column)
+            if date_cache is not None:
+                date_cache[column] = cached
+
+        if not cached or not cached.get("date_items"):
+            logger.warning("standardize_date_format for %r: no date items found -- skipping", column)
+            return None
+
+        params["column"] = column
+        params["target_format"] = params.get("target_format") or cached["default_style"]
+        params["value_map"] = params.get("value_map") or cached["default_map"]
+        params["date_items"] = cached["date_items"]
+        params["distinct_values"] = cached["distinct_values"]
+        params["styles"] = cached["styles"]
+
+    elif operation == "standardize_category":
+        # Never standardize date columns as categories
+        if date_cache and column in date_cache:
+            logger.info("Rejected standardize_category for date column %r", column)
+            return None
+
         if column not in mapping_cache:
             if ai_client is not None:
                 mapping, rec, warn_desc, extra_info = _fill_standardize_mapping_ai(
@@ -538,11 +698,20 @@ def _validate_and_enrich(
         if not recommended and warn_desc:
             description = warn_desc
 
+    col_lower = column.lower()
+    is_phone = (col_lower in ("phone", "mobile", "contact_no")) or ("phone" in col_lower)
+    if is_phone and operation in ("coerce_numeric", "flag_negative_values", "clip_negative_to_null", "remove_outliers"):
+        logger.info("Rejected numeric operation %r for phone column %r", operation, column)
+        return None
+
+    if operation == "manual_value_override":
+        params["overrides"] = params.get("overrides", {})
+
     severity = raw.get("severity", "medium")
     if severity not in ALLOWED_SEVERITIES:
         severity = "medium"
 
-    return {
+    result = {
         "id": str(uuid.uuid4()),
         "action": operation,
         "params": params,
@@ -551,11 +720,212 @@ def _validate_and_enrich(
         "ai_reason": raw.get("reason"),
         "recommended": recommended,
     }
+    if "flagged_values" in raw:
+        result["flagged_values"] = raw["flagged_values"]
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def _build_guaranteed_column_response(
+    df: pd.DataFrame,
+    profile: dict[str, Any],
+    all_suggestions: list[dict[str, Any]],
+    date_cache: dict[str, dict],
+    mapping_cache: dict[str, dict],
+    general_notes: list[str],
+    source: str,
+) -> dict[str, Any]:
+    """
+    Given all validated/discovered suggestions, build a dictionary keyed by column name first
+    for all N columns in profile["columns"]. Then emit exactly N column_results objects in the
+    exact order of profile["columns"].
+    """
+    columns_meta = profile.get("columns", [])
+
+    # 1. Authoritative registry of all N columns in profile order
+    column_entries: dict[str, dict[str, Any]] = {}
+    for col_meta in columns_meta:
+        col_name = col_meta.get("name", "")
+        inferred = (col_meta.get("inferred_type") or "").lower()
+        col_lower = col_name.lower()
+        if (inferred == "phone") or any(k in col_lower for k in ("phone", "mobile", "contact")):
+            inferred = "phone"
+        elif (inferred == "email") or any(k in col_lower for k in ("email", "e-mail")):
+            inferred = "email"
+
+        column_entries[col_name] = {
+            "name": col_name,
+            "column": col_name,
+            "status": "clean",
+            "inferred_type": inferred,
+            "issues": [],
+            "card_type": "clean",
+            "date_analysis": None,
+            "categorical_analysis": None,
+        }
+
+    dataset_issues: list[dict[str, Any]] = []
+
+    # 2. Attach date analysis to date columns
+    for col_name, date_data in date_cache.items():
+        if col_name in column_entries and date_data.get("date_items"):
+            entry = column_entries[col_name]
+            entry["date_analysis"] = date_data
+            entry["card_type"] = "date"
+            entry["status"] = "has_issues"
+            entry["issues"].append({
+                "id": str(uuid.uuid4()),
+                "action": "standardize_date_format",
+                "params": {
+                    "column": col_name,
+                    "target_format": date_data.get("default_style", "YYYY-MM-DD"),
+                    "default_target_format": date_data.get("default_style", "YYYY-MM-DD"),
+                    "value_map": date_data.get("default_map", {}),
+                    "date_items": date_data.get("date_items", []),
+                    "distinct_values": date_data.get("distinct_values", {}),
+                    "styles": date_data.get("styles", {}),
+                },
+                "description": f"Standardize date format in '{col_name}'",
+                "severity": "medium",
+                "ai_reason": "Inconsistent date representations detected across distinct values.",
+                "recommended": True,
+            })
+
+    # 3. Attach categorical analysis to categorical columns (excluding date columns)
+    for col_name, cat_data in mapping_cache.items():
+        if col_name in column_entries and col_name not in date_cache:
+            extra_info = cat_data.get("extra_info", {})
+            if cat_data.get("mapping") or extra_info.get("groups"):
+                entry = column_entries[col_name]
+                entry["categorical_analysis"] = {
+                    "mapping": cat_data.get("mapping", {}),
+                    "distinct_values": extra_info.get("distinct_values", {}),
+                    "variant_confidences": extra_info.get("variant_confidences", {}),
+                    "groups": extra_info.get("groups", []),
+                }
+                entry["card_type"] = "categorical"
+                entry["status"] = "has_issues"
+                entry["issues"].append({
+                    "id": str(uuid.uuid4()),
+                    "action": "standardize_category",
+                    "params": {
+                        "column": col_name,
+                        "mapping": cat_data.get("mapping", {}),
+                        "distinct_values": extra_info.get("distinct_values", {}),
+                        "variant_confidences": extra_info.get("variant_confidences", {}),
+                        "groups": extra_info.get("groups", []),
+                    },
+                    "description": f"Standardize categories in '{col_name}'",
+                    "severity": "medium",
+                    "ai_reason": "Deterministic or semantic groupings found.",
+                    "recommended": cat_data.get("recommended", True),
+                })
+
+    # 4. Merge all other suggestions into their respective column or dataset_issues
+    for sug in all_suggestions:
+        action = sug.get("action")
+        col = (sug.get("params") or {}).get("column")
+        if not col or action == "drop_duplicates":
+            if not any(d.get("action") == action for d in dataset_issues):
+                dataset_issues.append(sug)
+            continue
+
+        if col in column_entries:
+            entry = column_entries[col]
+            # Disallow standardize_category on date columns
+            if action == "standardize_category" and entry["card_type"] == "date":
+                continue
+            # Deduplicate by action name within the same column (except flag_invalid_email)
+            existing_actions = {iss.get("action") for iss in entry["issues"]}
+            if action == "flag_invalid_email" or action not in existing_actions:
+                entry["issues"].append(sug)
+                entry["status"] = "has_issues"
+                if entry["card_type"] == "clean":
+                    if action in ("coerce_numeric", "flag_negative_values", "clip_negative_to_null", "remove_outliers") and entry["inferred_type"] != "phone":
+                        entry["card_type"] = "numeric"
+                    elif action in ("standardize_category", "normalize_case"):
+                        entry["card_type"] = "categorical"
+                    else:
+                        entry["card_type"] = "structural"
+
+    # 5. Check duplicate row count at dataset level
+    dup_rows = profile.get("duplicate_row_count", 0)
+    if dup_rows > 0 and not any(d.get("action") == "drop_duplicates" for d in dataset_issues):
+        dataset_issues.insert(0, {
+            "id": str(uuid.uuid4()),
+            "action": "drop_duplicates",
+            "params": {},
+            "description": f"Remove {dup_rows} duplicate row{'s' if dup_rows > 1 else ''}",
+            "severity": "high",
+            "ai_reason": None,
+            "recommended": True,
+        })
+
+    # 6. Final resolution of status and card_type, and emit exactly N ordered items
+    column_results: list[dict[str, Any]] = []
+    for col_meta in columns_meta:
+        col_name = col_meta.get("name", "")
+        if col_name in column_entries:
+            entry = column_entries[col_name]
+            if not entry["issues"]:
+                entry["status"] = "clean"
+                entry["card_type"] = "clean"
+            else:
+                entry["status"] = "has_issues"
+            column_results.append(entry)
+
+    # 7. Flatten all suggestions for legacy compatibility
+    flat_suggestions = list(dataset_issues)
+    for cr in column_results:
+        flat_suggestions.extend(cr["issues"])
+
+    return {
+        "column_results": column_results,
+        "dataset_issues": dataset_issues,
+        "general_notes": general_notes,
+        "source": source,
+        "suggestions": flat_suggestions,
+    }
+
+
+def _generate_rule_based_pipeline(df: pd.DataFrame, profile: dict[str, Any]) -> dict[str, Any]:
+    raw_rule_sug = suggest_cleaning_steps(df, profile)
+    date_cache: dict[str, dict] = {}
+    mapping_cache: dict[str, dict] = {}
+
+    for col_meta in profile.get("columns", []):
+        col_name = col_meta.get("name", "")
+        if col_name in df.columns:
+            if _is_datetime_column(df[col_name], col_meta):
+                date_cache[col_name] = _analyze_date_column(df[col_name], col_name)
+
+    for s in raw_rule_sug:
+        if s.get("action") == "standardize_category":
+            col = (s.get("params") or {}).get("column")
+            if col and col not in date_cache:
+                mapping_cache[col] = {
+                    "mapping": s["params"].get("mapping", {}),
+                    "recommended": s.get("recommended", True),
+                    "extra_info": {
+                        "distinct_values": s["params"].get("distinct_values", {}),
+                        "variant_confidences": s["params"].get("variant_confidences", {}),
+                        "groups": s["params"].get("groups", []),
+                    },
+                }
+
+    return _build_guaranteed_column_response(
+        df,
+        profile,
+        all_suggestions=raw_rule_sug,
+        date_cache=date_cache,
+        mapping_cache=mapping_cache,
+        general_notes=[],
+        source="rule_based_fallback",
+    )
+
 
 def generate_ai_suggestions(
     df: pd.DataFrame,
@@ -563,15 +933,13 @@ def generate_ai_suggestions(
 ) -> dict[str, Any]:
     """
     Generate AI-powered cleaning suggestions.
+    Guaranteed: Returns exactly N column_results objects corresponding 1-to-1
+    with profile["columns"] in original file order.
     """
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         logger.info("No GEMINI_API_KEY -- using rule-based fallback")
-        return {
-            "suggestions": suggest_cleaning_steps(df, profile),
-            "general_notes": [],
-            "source": "rule_based_fallback",
-        }
+        return _generate_rule_based_pipeline(df, profile)
 
     try:
         from google import genai
@@ -581,24 +949,37 @@ def generate_ai_suggestions(
         models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
 
         # ------------------------------------------------------------------
-        # Phase 0: Deterministic per-column categorical grouping.
-        # Call _ai_semantic_grouping for EVERY categorical/text column
-        # unconditionally. Pre-populate mapping_cache so _validate_and_enrich
-        # reuses these results without making a second AI call, and so Phase 2
-        # can inject suggestions for columns Gemini's main prompt skips.
+        # Phase 0: Deterministic per-column categorical & date grouping.
+        # Check all eligible columns. Date columns are routed directly to
+        # date format analysis (never clustered as categories). Categorical
+        # columns are sent through _ai_semantic_grouping.
         # ------------------------------------------------------------------
-        _CATEGORICAL_INFERRED_TYPES = {"categorical", "text", "string", "object"}
+        _CATEGORICAL_INFERRED_TYPES = {"categorical", "text", "string", "object", "datetime"}
 
         mapping_cache: dict[str, dict] = {}
+        date_cache: dict[str, dict] = {}
         for col_meta in profile.get("columns", []):
             inferred = (col_meta.get("inferred_type") or "").lower()
             col_name = col_meta.get("name", "")
-            if inferred in _CATEGORICAL_INFERRED_TYPES and col_name in df.columns:
+            if col_name not in df.columns:
+                continue
+
+            col_lower = col_name.lower()
+            is_phone = (inferred == "phone") or any(k in col_lower for k in ("phone", "mobile", "contact"))
+            is_email = (inferred == "email") or any(k in col_lower for k in ("email", "e-mail"))
+
+            if _is_datetime_column(df[col_name], col_meta):
+                date_data = _analyze_date_column(df[col_name], col_name)
+                date_cache[col_name] = date_data
+                logger.info(
+                    "Phase-0 date analysis for %r: %d distinct values",
+                    col_name,
+                    len(date_data.get("date_items", [])),
+                )
+            elif not is_phone and not is_email and inferred in _CATEGORICAL_INFERRED_TYPES:
                 mapping, rec, warn, extra = _fill_standardize_mapping_ai(
                     df, col_name, client, models_to_try
                 )
-                # Always store in cache — even when empty — to prevent a
-                # redundant AI call inside _validate_and_enrich later.
                 mapping_cache[col_name] = {
                     "mapping": mapping,
                     "recommended": rec,
@@ -639,72 +1020,46 @@ def generate_ai_suggestions(
         general_notes: list[str] = [str(n) for n in parsed.get("general_notes", []) if n]
         validated: list[dict[str, Any]] = []
         for raw_sug in raw_suggestions:
-            result = _validate_and_enrich(raw_sug, df, mapping_cache, client, models_to_try)
+            result = _validate_and_enrich(raw_sug, df, mapping_cache, client, models_to_try, date_cache=date_cache)
             if result is not None:
                 validated.append(result)
 
-        # ------------------------------------------------------------------
-        # Phase 2: Inject standardize_category for any categorical column
-        # that has grouping results but was missed by Gemini's main prompt.
-        # ------------------------------------------------------------------
-        already_covered: set[str] = {
-            s["params"]["column"]
-            for s in validated
-            if s["action"] == "standardize_category" and "column" in (s.get("params") or {})
-        }
-        for col_name, data in mapping_cache.items():
-            if col_name in already_covered:
-                continue
-            extra_info = data.get("extra_info", {})
-            if not data.get("mapping") and not extra_info.get("groups"):
-                # No groupings found — nothing to surface
-                continue
-            validated.append({
-                "id": str(uuid.uuid4()),
-                "action": "standardize_category",
-                "params": {
-                    "column": col_name,
-                    "mapping": data["mapping"],
-                    "distinct_values": extra_info.get("distinct_values", {}),
-                    "variant_confidences": extra_info.get("variant_confidences", {}),
-                    "groups": extra_info.get("groups", []),
-                },
-                "description": f"Standardize categories in '{col_name}' (exhaustive scan)",
-                "severity": "medium",
-                "ai_reason": "Deterministic per-column scan found variant groupings not flagged by main prompt.",
-                "recommended": data.get("recommended", True),
-            })
-            logger.info("Phase-2 injected standardize_category for %r", col_name)
+        # Supplementary safety net: inject essential structural fixes from rule engine
+        rule_suggestions = suggest_cleaning_steps(df, profile)
+        covered_actions_by_col: dict[str, set[str]] = {}
+        for s in validated:
+            c = (s.get("params") or {}).get("column")
+            if c:
+                covered_actions_by_col.setdefault(c, set()).add(s.get("action"))
 
-        dup_rows = profile.get("duplicate_row_count", 0)
-        if dup_rows > 0 and not any(v["action"] == "drop_duplicates" for v in validated):
-            validated.insert(0, {
-                "id": str(uuid.uuid4()),
-                "action": "drop_duplicates",
-                "params": {},
-                "description": f"Remove {dup_rows} duplicate row{'s' if dup_rows > 1 else ''}",
-                "severity": "high",
-                "ai_reason": None,
-                "recommended": True,
-            })
+        for rs in rule_suggestions:
+            r_col = rs.get("params", {}).get("column")
+            r_act = rs.get("action")
+            if not r_col:
+                continue
+            if r_act not in ("standardize_category", "standardize_date_format"):
+                if r_act not in covered_actions_by_col.get(r_col, set()):
+                    validated.append(rs)
+                    covered_actions_by_col.setdefault(r_col, set()).add(r_act)
 
         logger.info(
             "AI suggestions: %d valid out of %d from Gemini, %d general notes",
             len(validated), len(raw_suggestions), len(general_notes),
         )
-        return {
-            "suggestions": validated,
-            "general_notes": general_notes,
-            "source": "ai",
-        }
+
+        return _build_guaranteed_column_response(
+            df,
+            profile,
+            all_suggestions=validated,
+            date_cache=date_cache,
+            mapping_cache=mapping_cache,
+            general_notes=general_notes,
+            source="ai",
+        )
 
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "AI suggestions failed (%s: %s) -- falling back to rule-based engine",
             type(exc).__name__, exc,
         )
-        return {
-            "suggestions": suggest_cleaning_steps(df, profile),
-            "general_notes": [],
-            "source": "rule_based_fallback",
-        }
+        return _generate_rule_based_pipeline(df, profile)
