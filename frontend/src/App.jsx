@@ -154,32 +154,41 @@ function ChatBot({ datasetId, onPreviewChatAction, chartContext }) {
                   <div key={idx} className="chat-message-group">
                     {msg.sender === "user" ? (
                       <div className="chat-bubble user">{msg.text}</div>
-                    ) : msg.proposed_action && actionEntry !== undefined ? (
-                      <div className="chat-action-card">
-                        <div className="chat-markdown">
-                          <ReactMarkdown>{msg.text || msg.proposed_action.reasoning}</ReactMarkdown>
-                        </div>
-                        <button
-                          className="chat-preview-btn"
-                          disabled={actionEntry?.previewLoading || !datasetId}
-                          onClick={() => {
-                            const idx2 = pendingActions.findIndex(
-                              (a) =>
-                                a.proposed_action.column === msg.proposed_action.column &&
-                                a.proposed_action.operation === msg.proposed_action.operation
-                            );
-                            handlePreviewFix(msg.proposed_action, idx2);
-                          }}
-                        >
-                          {actionEntry?.previewLoading ? "Loading preview…" : "Preview this fix"}
-                        </button>
-                      </div>
                     ) : (
-                      <div className="chat-bubble assistant">
-                        <div className="chat-markdown">
-                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      <>
+                        {/* Assistant explanation text — always in a normal bubble */}
+                        <div className="chat-bubble assistant">
+                          <div className="chat-markdown">
+                            <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          </div>
                         </div>
-                      </div>
+                        {/* Compact action card — only when there's a proposed fix */}
+                        {msg.proposed_action && actionEntry !== undefined && (
+                          <div className="chat-action-card">
+                            <div className="chat-action-summary">
+                              <span className="chat-action-icon">🔧</span>
+                              <span className="chat-action-label">
+                                Suggested: <strong>{msg.proposed_action.operation}</strong>
+                                {msg.proposed_action.column && <> on <strong>'{msg.proposed_action.column}'</strong></>}
+                              </span>
+                            </div>
+                            <button
+                              className="chat-preview-btn"
+                              disabled={actionEntry?.previewLoading || !datasetId}
+                              onClick={() => {
+                                const idx2 = pendingActions.findIndex(
+                                  (a) =>
+                                    a.proposed_action.column === msg.proposed_action.column &&
+                                    a.proposed_action.operation === msg.proposed_action.operation
+                                );
+                                handlePreviewFix(msg.proposed_action, idx2);
+                              }}
+                            >
+                              {actionEntry?.previewLoading ? "Loading preview…" : "Preview this fix"}
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -346,6 +355,236 @@ const CHART_COLORS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Shared chart renderers — used by both ChartBuilder and ChartPanel
+// ---------------------------------------------------------------------------
+
+function renderSharedHistogram(chartData) {
+  if (!chartData) return null;
+  const { labels, values, x_label } = chartData;
+  const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }} barCategoryGap={1}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
+        <Bar dataKey="value" name={x_label} fill="#1c6e8c" radius={[2, 2, 0, 0]} maxBarSize={60} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedStackedBar(chartData) {
+  if (!chartData || !chartData.series) return null;
+  const { labels, series } = chartData;
+  const data = labels.map((label, i) => {
+    const row = { label: String(label) };
+    series.forEach((s) => { row[s.name] = s.data[i] ?? 0; });
+    return row;
+  });
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        {series.map((s, i) => (
+          <Bar
+            key={s.name}
+            dataKey={s.name}
+            stackId="a"
+            fill={CHART_COLORS[i % CHART_COLORS.length]}
+            radius={i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+          />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedBoxPlot(chartData) {
+  if (!chartData || !chartData.box_stats) return null;
+  const { labels, box_stats, y_label } = chartData;
+
+  const allVals = box_stats.flatMap((s) => [s.min, s.max]);
+  const gMin = Math.min(...allVals);
+  const gMax = Math.max(...allVals);
+  const range = gMax - gMin || 1;
+
+  const PAD_TOP = 20, PAD_BOT = 52, PAD_LEFT = 62, PAD_RIGHT = 20;
+  const CHART_H = 320;
+  const N = labels.length;
+  const COL_W = Math.max(80, Math.min(160, Math.floor(540 / Math.max(N, 1))));
+  const CHART_W = PAD_LEFT + N * COL_W + PAD_RIGHT;
+  const PLOT_H = CHART_H - PAD_TOP - PAD_BOT;
+  const BOX_HALF = Math.min(22, COL_W * 0.28);
+  const toY = (v) => PAD_TOP + PLOT_H * (1 - (v - gMin) / range);
+  const ticks = 5;
+  const yTicks = Array.from({ length: ticks + 1 }, (_, i) => gMin + (range * i) / ticks);
+  const fmtNum = (v) => {
+    if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
+    return v % 1 === 0 ? String(v) : v.toFixed(1);
+  };
+
+  return (
+    <div style={{ overflowX: "auto", padding: "8px 0" }}>
+      <svg width={CHART_W} height={CHART_H} style={{ display: "block", minWidth: "100%" }}>
+        {yTicks.map((tick, i) => (
+          <line key={i} x1={PAD_LEFT} y1={toY(tick)} x2={CHART_W - PAD_RIGHT} y2={toY(tick)} stroke="#f0eeea" strokeWidth={1} />
+        ))}
+        <line x1={PAD_LEFT} y1={PAD_TOP} x2={PAD_LEFT} y2={PAD_TOP + PLOT_H} stroke="#ccc" strokeWidth={1} />
+        {yTicks.map((tick, i) => (
+          <g key={i}>
+            <line x1={PAD_LEFT - 4} y1={toY(tick)} x2={PAD_LEFT} y2={toY(tick)} stroke="#aaa" strokeWidth={1} />
+            <text x={PAD_LEFT - 8} y={toY(tick)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#888">{fmtNum(tick)}</text>
+          </g>
+        ))}
+        <text x={14} y={PAD_TOP + PLOT_H / 2} textAnchor="middle" fontSize={11} fill="#888"
+          transform={`rotate(-90, 14, ${PAD_TOP + PLOT_H / 2})`}>{y_label}</text>
+
+        {box_stats.map((stat, i) => {
+          const cx = PAD_LEFT + (i + 0.5) * COL_W;
+          const yQ1 = toY(stat.q1);
+          const yQ3 = toY(stat.q3);
+          const yMed = toY(stat.median);
+          const yMin = toY(stat.min);
+          const yMax = toY(stat.max);
+          const capW = BOX_HALF * 0.6;
+          const label = String(labels[i]);
+
+          return (
+            <g key={i}>
+              <line x1={cx} y1={yQ3} x2={cx} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
+              <line x1={cx - capW} y1={yMax} x2={cx + capW} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
+              <line x1={cx} y1={yQ1} x2={cx} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
+              <line x1={cx - capW} y1={yMin} x2={cx + capW} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
+              <rect x={cx - BOX_HALF} y={yQ3} width={BOX_HALF * 2} height={Math.max(1, yQ1 - yQ3)}
+                fill="rgba(28,110,140,0.13)" stroke="#1c6e8c" strokeWidth={1.5} rx={2} />
+              <line x1={cx - BOX_HALF} y1={yMed} x2={cx + BOX_HALF} y2={yMed} stroke="#1c6e8c" strokeWidth={2.5} />
+              <text x={cx + BOX_HALF + 4} y={yMed} dominantBaseline="middle" fontSize={9} fill="#1c6e8c">{fmtNum(stat.median)}</text>
+              <text x={cx} y={PAD_TOP + PLOT_H + 18} textAnchor="middle" fontSize={11} fill="#666">
+                {label.length > 13 ? `${label.slice(0, 12)}…` : label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function renderSharedChart(chartData, chartType) {
+  if (!chartData) return null;
+  if (chartType === "histogram") return renderSharedHistogram(chartData);
+  if (chartType === "stacked_bar") return renderSharedStackedBar(chartData);
+  if (chartType === "box_plot") return renderSharedBoxPlot(chartData);
+
+  const { labels, values, x_label, y_label } = chartData;
+
+  if (chartType === "pie") {
+    const slices = labels.slice(0, 10).map((l, i) => ({ name: String(l), value: values[i] ?? 0 }));
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <PieChart>
+          <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120}
+            label={({ name, percent }) => `${name} (${(percent * 100).toFixed(1)}%)`} labelLine={false}>
+            {slices.map((_, i) => (<Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />))}
+          </Pie>
+          <Tooltip formatter={(v) => [v.toLocaleString(), "Count"]} contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
+
+  if (chartType === "bar") {
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
+          <Bar dataKey="value" name={y_label} fill="#1c6e8c" radius={[3, 3, 0, 0]} maxBarSize={48} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (chartType === "line") {
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <LineChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Line type="monotone" dataKey="value" name={y_label} stroke="#1c6e8c" strokeWidth={2.5} dot={{ r: 3, fill: "#1c6e8c" }} activeDot={{ r: 5 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (chartType === "scatter") {
+    const scatterData = labels.map((l, i) => ({ x: i, y: values[i] ?? 0, label: String(l) }));
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="x" type="number" name={x_label} tick={{ fontSize: 11 }} tickFormatter={(v) => String(labels[v] ?? v).slice(0, 12)} />
+          <YAxis dataKey="y" type="number" name={y_label} tick={{ fontSize: 11 }} />
+          <Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ payload }) => {
+            if (!payload?.length) return null;
+            const pt = payload[0]?.payload;
+            if (!pt) return null;
+            return (<div className="chart-scatter-tooltip"><div className="chart-scatter-tooltip-label">{pt.label}</div><div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div></div>);
+          }} />
+          <Scatter name={y_label} data={scatterData} fill="#1c6e8c" opacity={0.8} />
+        </ScatterChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Column type helpers for the Visualize sidebar
+// ---------------------------------------------------------------------------
+const TYPE_ICON_MAP = {
+  numeric: { icon: "🔢", cls: "numeric", label: "num" },
+  non_negative_numeric: { icon: "🔢", cls: "numeric", label: "num" },
+  identifier: { icon: "🔢", cls: "numeric", label: "id" },
+  categorical: { icon: "🏷️", cls: "categorical", label: "cat" },
+  datetime: { icon: "📅", cls: "datetime", label: "date" },
+  boolean: { icon: "🏷️", cls: "categorical", label: "bool" },
+  email: { icon: "📝", cls: "text", label: "txt" },
+  phone: { icon: "📝", cls: "text", label: "txt" },
+  text: { icon: "📝", cls: "text", label: "txt" },
+};
+
+function getTypeInfo(inferredType) {
+  return TYPE_ICON_MAP[inferredType] || TYPE_ICON_MAP.text;
+}
+
+function isNumericType(inferredType, dtype) {
+  if (inferredType === "numeric" || inferredType === "non_negative_numeric") return true;
+  if (["int64", "float64", "int32", "float32", "int16", "float16"].includes(dtype)) return true;
+  return false;
+}
+
+function isCategoricalType(inferredType, dtype) {
+  return inferredType === "categorical" || dtype === "object";
+}
+
+// ---------------------------------------------------------------------------
 // ChartBuilder — interactive chart section rendered below the profiling report
 // ---------------------------------------------------------------------------
 function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
@@ -437,214 +676,8 @@ function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Renderers
-  // ---------------------------------------------------------------------------
-  const renderHistogram = () => {
-    if (!chartData) return null;
-    const { labels, values, x_label } = chartData;
-    const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
-    return (
-      <ResponsiveContainer width="100%" height={340}>
-        <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }} barCategoryGap={1}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
-          <Bar dataKey="value" name={x_label} fill="#1c6e8c" radius={[2, 2, 0, 0]} maxBarSize={60} />
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  };
-
-  const renderStackedBar = () => {
-    if (!chartData || !chartData.series) return null;
-    const { labels, series } = chartData;
-    const data = labels.map((label, i) => {
-      const row = { label: String(label) };
-      series.forEach((s) => { row[s.name] = s.data[i] ?? 0; });
-      return row;
-    });
-    return (
-      <ResponsiveContainer width="100%" height={340}>
-        <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          {series.map((s, i) => (
-            <Bar
-              key={s.name}
-              dataKey={s.name}
-              stackId="a"
-              fill={CHART_COLORS[i % CHART_COLORS.length]}
-              radius={i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
-            />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  };
-
-  const renderBoxPlot = () => {
-    if (!chartData || !chartData.box_stats) return null;
-    const { labels, box_stats, y_label } = chartData;
-
-    const allVals = box_stats.flatMap((s) => [s.min, s.max]);
-    const gMin = Math.min(...allVals);
-    const gMax = Math.max(...allVals);
-    const range = gMax - gMin || 1;
-
-    const PAD_TOP = 20, PAD_BOT = 52, PAD_LEFT = 62, PAD_RIGHT = 20;
-    const CHART_H = 320;
-    const N = labels.length;
-    const COL_W = Math.max(80, Math.min(160, Math.floor(540 / Math.max(N, 1))));
-    const CHART_W = PAD_LEFT + N * COL_W + PAD_RIGHT;
-    const PLOT_H = CHART_H - PAD_TOP - PAD_BOT;
-    const BOX_HALF = Math.min(22, COL_W * 0.28);
-    // In SVG, Y increases downward. Higher values appear at smaller Y coords.
-    const toY = (v) => PAD_TOP + PLOT_H * (1 - (v - gMin) / range);
-    const ticks = 5;
-    const yTicks = Array.from({ length: ticks + 1 }, (_, i) => gMin + (range * i) / ticks);
-    const fmtNum = (v) => {
-      if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-      if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
-      return v % 1 === 0 ? String(v) : v.toFixed(1);
-    };
-
-    return (
-      <div style={{ overflowX: "auto", padding: "8px 0" }}>
-        <svg width={CHART_W} height={CHART_H} style={{ display: "block", minWidth: "100%" }}>
-          {/* Gridlines */}
-          {yTicks.map((tick, i) => (
-            <line key={i} x1={PAD_LEFT} y1={toY(tick)} x2={CHART_W - PAD_RIGHT} y2={toY(tick)} stroke="#f0eeea" strokeWidth={1} />
-          ))}
-          {/* Y axis */}
-          <line x1={PAD_LEFT} y1={PAD_TOP} x2={PAD_LEFT} y2={PAD_TOP + PLOT_H} stroke="#ccc" strokeWidth={1} />
-          {yTicks.map((tick, i) => (
-            <g key={i}>
-              <line x1={PAD_LEFT - 4} y1={toY(tick)} x2={PAD_LEFT} y2={toY(tick)} stroke="#aaa" strokeWidth={1} />
-              <text x={PAD_LEFT - 8} y={toY(tick)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#888">{fmtNum(tick)}</text>
-            </g>
-          ))}
-          <text x={14} y={PAD_TOP + PLOT_H / 2} textAnchor="middle" fontSize={11} fill="#888"
-            transform={`rotate(-90, 14, ${PAD_TOP + PLOT_H / 2})`}>{y_label}</text>
-
-          {box_stats.map((stat, i) => {
-            const cx = PAD_LEFT + (i + 0.5) * COL_W;
-            const yQ1 = toY(stat.q1);   // lower on screen (larger Y)
-            const yQ3 = toY(stat.q3);   // higher on screen (smaller Y)
-            const yMed = toY(stat.median);
-            const yMin = toY(stat.min);  // lowest on screen
-            const yMax = toY(stat.max);  // highest on screen
-            const capW = BOX_HALF * 0.6;
-            const label = String(labels[i]);
-
-            return (
-              <g key={i}>
-                {/* Upper whisker: from top of box (yQ3) to max (yMax, smaller Y) */}
-                <line x1={cx} y1={yQ3} x2={cx} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
-                <line x1={cx - capW} y1={yMax} x2={cx + capW} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
-                {/* Lower whisker: from bottom of box (yQ1) to min (yMin, larger Y) */}
-                <line x1={cx} y1={yQ1} x2={cx} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
-                <line x1={cx - capW} y1={yMin} x2={cx + capW} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
-                {/* IQR box: yQ3 is top edge, height = yQ1 - yQ3 (positive since yQ1 > yQ3) */}
-                <rect x={cx - BOX_HALF} y={yQ3} width={BOX_HALF * 2} height={Math.max(1, yQ1 - yQ3)}
-                  fill="rgba(28,110,140,0.13)" stroke="#1c6e8c" strokeWidth={1.5} rx={2} />
-                {/* Median */}
-                <line x1={cx - BOX_HALF} y1={yMed} x2={cx + BOX_HALF} y2={yMed} stroke="#1c6e8c" strokeWidth={2.5} />
-                {/* Median label */}
-                <text x={cx + BOX_HALF + 4} y={yMed} dominantBaseline="middle" fontSize={9} fill="#1c6e8c">{fmtNum(stat.median)}</text>
-                {/* X label */}
-                <text x={cx} y={PAD_TOP + PLOT_H + 18} textAnchor="middle" fontSize={11} fill="#666">
-                  {label.length > 13 ? `${label.slice(0, 12)}…` : label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-    );
-  };
-
-  const renderChartInner = () => {
-    if (!chartData) return null;
-    if (chartType === "histogram") return renderHistogram();
-    if (chartType === "stacked_bar") return renderStackedBar();
-    if (chartType === "box_plot") return renderBoxPlot();
-
-    const { labels, values, x_label, y_label } = chartData;
-
-    if (chartType === "pie") {
-      const slices = labels.slice(0, 10).map((l, i) => ({ name: String(l), value: values[i] ?? 0 }));
-      return (
-        <ResponsiveContainer width="100%" height={340}>
-          <PieChart>
-            <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120}
-              label={({ name, percent }) => `${name} (${(percent * 100).toFixed(1)}%)`} labelLine={false}>
-              {slices.map((_, i) => (<Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />))}
-            </Pie>
-            <Tooltip formatter={(v) => [v.toLocaleString(), "Count"]} contentStyle={{ fontSize: 12, borderRadius: 4 }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-          </PieChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
-
-    if (chartType === "bar") {
-      return (
-        <ResponsiveContainer width="100%" height={340}>
-          <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-            <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
-            <Bar dataKey="value" name={y_label} fill="#1c6e8c" radius={[3, 3, 0, 0]} maxBarSize={48} />
-          </BarChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    if (chartType === "line") {
-      return (
-        <ResponsiveContainer width="100%" height={340}>
-          <LineChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-            <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Line type="monotone" dataKey="value" name={y_label} stroke="#1c6e8c" strokeWidth={2.5} dot={{ r: 3, fill: "#1c6e8c" }} activeDot={{ r: 5 }} />
-          </LineChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    if (chartType === "scatter") {
-      const scatterData = labels.map((l, i) => ({ x: i, y: values[i] ?? 0, label: String(l) }));
-      return (
-        <ResponsiveContainer width="100%" height={340}>
-          <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-            <XAxis dataKey="x" type="number" name={x_label} tick={{ fontSize: 11 }} tickFormatter={(v) => String(labels[v] ?? v).slice(0, 12)} />
-            <YAxis dataKey="y" type="number" name={y_label} tick={{ fontSize: 11 }} />
-            <Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ payload }) => {
-              if (!payload?.length) return null;
-              const pt = payload[0]?.payload;
-              if (!pt) return null;
-              return (<div className="chart-scatter-tooltip"><div className="chart-scatter-tooltip-label">{pt.label}</div><div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div></div>);
-            }} />
-            <Scatter name={y_label} data={scatterData} fill="#1c6e8c" opacity={0.8} />
-          </ScatterChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    return null;
-  };
+  // Delegate to shared renderers
+  const renderChartInner = () => renderSharedChart(chartData, chartType);
 
   return (
     <div className="chart-section smooth-expand">
@@ -751,6 +784,257 @@ function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
           &nbsp;·&nbsp;{chartData.x_label}{chartData.y_label && chartData.y_label !== "Count" ? ` → ${chartData.y_label}` : ""}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChartPanel — a single independently-configurable chart slot in the Visualize workspace
+// ---------------------------------------------------------------------------
+function ChartPanel({ index, datasetId, columns, onRemove }) {
+  const allCols = columns || [];
+  const catCols = allCols.filter((c) => isCategoricalType(c.inferred_type, c.dtype));
+  const numCols = allCols.filter((c) => isNumericType(c.inferred_type, c.dtype));
+
+  const defaultX = (catCols[0] || allCols[0])?.name || "";
+  const defaultY = numCols[0]?.name || "";
+
+  const [chartType, setChartType] = useState("bar");
+  const [xCol, setXCol] = useState(defaultX);
+  const [yCol, setYCol] = useState(defaultY);
+  const [stackCol, setStackCol] = useState((catCols[1] || catCols[0])?.name || "");
+  const [agg, setAgg] = useState("count");
+  const [chartData, setChartData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const needsY = chartType === "line" || chartType === "scatter" || (chartType === "bar" && agg !== "count");
+  const needsStack = chartType === "stacked_bar";
+  const isHistOrBox = chartType === "histogram" || chartType === "box_plot";
+
+  const doFetch = async (overrides = {}) => {
+    const ct = overrides.chartType ?? chartType;
+    const xc = overrides.xCol ?? xCol;
+    const yc = overrides.yCol ?? yCol;
+    const sc = overrides.stackCol ?? stackCol;
+    const ag = overrides.agg ?? agg;
+
+    if (!datasetId || !xc) return;
+    const needsYNow = ct === "line" || ct === "scatter" || (ct === "bar" && ag !== "count");
+    if (needsYNow && !yc) return;
+    if (ct === "stacked_bar" && !sc) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      let fetchY;
+      if (ct === "stacked_bar") fetchY = sc;
+      else if (needsYNow) fetchY = yc;
+      else if (ct === "box_plot" && yc) fetchY = yc;
+      else fetchY = undefined;
+
+      const data = await getChartData(datasetId, {
+        chartType: ct, x: xc, y: fetchY, agg: ag, useCleaned: true,
+      });
+      setChartData(data);
+    } catch (err) {
+      setError(err.message);
+      setChartData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChartTypeChange = (e) => {
+    const newType = e.target.value;
+    setChartType(newType);
+    const defaultNumX = numCols[0]?.name || "";
+    if ((newType === "histogram" || newType === "box_plot") && defaultNumX) {
+      if (!numCols.find((c) => c.name === xCol)) setXCol(defaultNumX);
+    }
+    if (newType === "stacked_bar") {
+      if (catCols.length > 0 && !catCols.find((c) => c.name === xCol))
+        setXCol(catCols[0]?.name || xCol);
+      setStackCol(catCols[1]?.name || catCols[0]?.name || "");
+    }
+    if ((newType === "line" || newType === "scatter") && !yCol && defaultY) {
+      setYCol(defaultY);
+    }
+  };
+
+  return (
+    <div className="viz-panel">
+      <div className="viz-panel-header">
+        <div className="viz-panel-ctrl">
+          <label className="chart-label">Type</label>
+          <select className="chart-select" value={chartType} onChange={handleChartTypeChange}>
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="scatter">Scatter</option>
+            <option value="pie">Pie</option>
+            <option value="histogram">Histogram</option>
+            <option value="stacked_bar">Stacked Bar</option>
+            <option value="box_plot">Box Plot</option>
+          </select>
+        </div>
+
+        <div className="viz-panel-ctrl">
+          <label className="chart-label">{isHistOrBox ? "Column" : "X axis"}</label>
+          <select className="chart-select" value={xCol} onChange={(e) => setXCol(e.target.value)}>
+            {(isHistOrBox ? (numCols.length > 0 ? numCols : allCols) : allCols).map((c) => (
+              <option key={c.name} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {needsY && (
+          <div className="viz-panel-ctrl">
+            <label className="chart-label">Y axis</label>
+            <select className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
+              {(numCols.length > 0 ? numCols : allCols).map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {needsStack && (
+          <div className="viz-panel-ctrl">
+            <label className="chart-label">Stack by</label>
+            <select className="chart-select" value={stackCol} onChange={(e) => setStackCol(e.target.value)}>
+              {(catCols.length > 0 ? catCols : allCols).map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {chartType === "box_plot" && catCols.length > 0 && (
+          <div className="viz-panel-ctrl">
+            <label className="chart-label">Group by</label>
+            <select className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
+              <option value="">— None —</option>
+              {catCols.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
+            </select>
+          </div>
+        )}
+
+        {!isHistOrBox && chartType !== "stacked_bar" && (
+          <div className="viz-panel-ctrl">
+            <label className="chart-label">Agg</label>
+            <select className="chart-select" value={agg} onChange={(e) => setAgg(e.target.value)}
+              disabled={chartType === "scatter" || chartType === "pie"}>
+              <option value="count">Count</option>
+              <option value="sum">Sum</option>
+              <option value="mean">Mean</option>
+            </select>
+          </div>
+        )}
+
+        <button className="viz-panel-gen-btn"
+          onClick={() => doFetch()}
+          disabled={loading || !xCol || (needsY && !yCol) || (needsStack && !stackCol)}>
+          {loading ? "…" : "Go"}
+        </button>
+
+        <button className="viz-panel-remove-btn" onClick={onRemove} title="Remove chart">
+          ✕
+        </button>
+      </div>
+
+      <div className="viz-panel-body">
+        {loading && (
+          <div className="chart-loading">
+            <div className="ledger-loading-track" style={{ width: 160 }}>
+              <div className="ledger-loading-bar" />
+            </div>
+            <span className="chart-loading-label">Generating…</span>
+          </div>
+        )}
+        {!loading && error && <div className="viz-panel-error">{error}</div>}
+        {!loading && !chartData && !error && (
+          <div className="chart-empty" style={{ minHeight: 120 }}>
+            Select columns and click <strong>Go</strong>
+          </div>
+        )}
+        {!loading && chartData && renderSharedChart(chartData, chartType)}
+      </div>
+
+      {chartData && !loading && (
+        <div className="viz-panel-meta">
+          {chartData.group_count} groups&nbsp;·&nbsp;{chartData.row_count?.toLocaleString()} rows
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// VisualizeWorkspace — full-page workspace with column sidebar + chart grid
+// ---------------------------------------------------------------------------
+function VisualizeWorkspace({ datasetId, columns }) {
+  // panels: array of 4 slots, each either { active: true } or { active: false }
+  const [panels, setPanels] = useState([
+    { active: true, key: 0 },
+    { active: false, key: 1 },
+    { active: false, key: 2 },
+    { active: false, key: 3 },
+  ]);
+  const nextKeyRef = useRef(4);
+
+  const activePanelCount = panels.filter((p) => p.active).length;
+
+  const activatePanel = (slotIdx) => {
+    setPanels((prev) => prev.map((p, i) =>
+      i === slotIdx ? { ...p, active: true, key: nextKeyRef.current++ } : p
+    ));
+  };
+
+  const removePanel = (slotIdx) => {
+    setPanels((prev) => prev.map((p, i) =>
+      i === slotIdx ? { ...p, active: false, key: nextKeyRef.current++ } : p
+    ));
+  };
+
+  return (
+    <div className="viz-workspace">
+      {/* --- Column sidebar --- */}
+      <aside className="viz-sidebar">
+        <div className="viz-sidebar-title">Columns ({columns.length})</div>
+        <div className="viz-col-list">
+          {columns.map((col) => {
+            const info = getTypeInfo(col.inferred_type);
+            return (
+              <div key={col.name} className="viz-col-item" title={`${col.name} (${col.inferred_type || col.dtype})`}>
+                <span className={`viz-col-icon ${info.cls}`}>{info.icon}</span>
+                <span className="viz-col-name">{col.name}</span>
+                <span className="viz-col-type-label">{info.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      {/* --- Chart grid --- */}
+      <div className={`viz-grid${activePanelCount <= 1 ? " cols-1" : ""}`}>
+        {panels.map((panel, idx) =>
+          panel.active ? (
+            <ChartPanel
+              key={panel.key}
+              index={idx}
+              datasetId={datasetId}
+              columns={columns}
+              onRemove={() => removePanel(idx)}
+            />
+          ) : (
+            <div key={panel.key} className="viz-placeholder" onClick={() => activatePanel(idx)}>
+              <div className="viz-placeholder-icon">＋</div>
+              <div className="viz-placeholder-label">Add Chart</div>
+              <div className="viz-placeholder-hint">Panel {idx + 1} of 4</div>
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -1680,6 +1964,9 @@ export default function App() {
   // Last chart generated — passed to ChatBot for visualization-aware replies
   const [lastChartData, setLastChartData] = useState(null);
 
+  // Tab state — "clean" or "visualize"
+  const [activeTab, setActiveTab] = useState("clean");
+
   // Steps override — set when chat proposes an action that we want to apply.
   const [chatPendingSteps, setChatPendingSteps] = useState(null);
 
@@ -2181,7 +2468,7 @@ export default function App() {
   const issueColumnCount = columnResults.filter((c) => c.status === "has_issues").length;
 
   return (
-    <div className="page">
+    <div className={`page${activeTab === "visualize" ? " viz-active" : ""}`}>
       <div className="masthead">
         <p className="eyebrow">Data profiler & cleaner · step 1 & 2</p>
         <h1>What's actually in your data</h1>
@@ -2213,6 +2500,25 @@ export default function App() {
               <span className="label">duplicate rows</span>
             </div>
           </div>
+
+          {/* --- Tab Switcher --- */}
+          <div className="tab-switcher">
+            <button
+              className={`tab-btn${activeTab === "clean" ? " active" : ""}`}
+              onClick={() => setActiveTab("clean")}
+            >
+              <span className="tab-icon">🧹</span>Clean & Review
+            </button>
+            <button
+              className={`tab-btn${activeTab === "visualize" ? " active" : ""}`}
+              onClick={() => setActiveTab("visualize")}
+            >
+              <span className="tab-icon">📊</span>Visualize
+            </button>
+          </div>
+
+          {/* ========== CLEAN TAB ========== */}
+          {activeTab === "clean" && (<>
 
           <div className="ledger-header">Columns</div>
           {displayReport.columns?.map((col, idx) => (
@@ -2431,6 +2737,16 @@ export default function App() {
           <button className="reset-link" onClick={resetAll}>
             ← Profile another file
           </button>
+
+          </>)}
+
+          {/* ========== VISUALIZE TAB ========== */}
+          {activeTab === "visualize" && (
+            <VisualizeWorkspace
+              datasetId={displayReport.dataset_id}
+              columns={displayReport.columns || []}
+            />
+          )}
         </div>
       )}
 

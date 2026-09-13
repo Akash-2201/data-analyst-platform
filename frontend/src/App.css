@@ -1106,42 +1106,33 @@
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   align-self: flex-start;
   max-width: 90%;
   animation: fadeInUp 0.25s ease-out forwards;
 }
 
-.chat-action-op {
+.chat-action-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-action-icon {
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .chat-action-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.chat-action-label strong {
   color: var(--accent);
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-family: var(--font-mono);
-}
-
-.chat-action-col {
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.chat-action-col strong {
-  color: var(--ink);
-  font-family: var(--font-mono);
-}
-
-.chat-action-reasoning {
-  font-size: 12px;
-  color: var(--ink);
-  line-height: 1.4;
 }
 
 .chat-preview-btn {
@@ -2239,4 +2230,380 @@ optgroup option {
   border-radius: 6px;
   overflow-x: auto;
   margin: 6px 0;
+}
+
+/* =====================================================================
+   Phase B — Visualize Workspace (tab, sidebar, 2×2 chart grid)
+   ===================================================================== */
+
+/* --- Tab Switcher --- */
+
+.tab-switcher {
+  display: flex;
+  gap: 0;
+  border-bottom: 1.5px solid var(--line);
+  margin: 28px 0 0;
+}
+
+.tab-btn {
+  padding: 11px 28px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -1.5px;
+  color: var(--ink-soft);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-btn:hover:not(.active) {
+  color: var(--ink);
+  background: rgba(28, 110, 140, 0.03);
+}
+
+.tab-btn .tab-icon {
+  margin-right: 7px;
+  font-size: 13px;
+}
+
+/* --- Visualize Workspace Layout --- */
+
+.viz-workspace {
+  display: flex;
+  gap: 24px;
+  margin-top: 28px;
+  min-height: 72vh;
+  animation: fadeInUp 0.35s ease-out forwards;
+}
+
+/* --- Column Sidebar --- */
+
+.viz-sidebar {
+  width: 228px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.viz-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.viz-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.viz-sidebar::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 2px;
+}
+
+.viz-sidebar-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-soft);
+  font-weight: 700;
+  margin-bottom: 10px;
+  padding: 0 12px;
+}
+
+.viz-col-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-col-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  font-size: 13px;
+  user-select: none;
+}
+
+.viz-col-item:hover {
+  background: var(--accent-soft);
+  transform: translateX(2px);
+}
+
+.viz-col-item:active {
+  transform: translateX(1px);
+}
+
+.viz-col-icon {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border-radius: 4px;
+  background: #f4f3ef;
+  flex-shrink: 0;
+}
+
+.viz-col-icon.numeric { background: #e8f0fe; }
+.viz-col-icon.categorical { background: #fef7e0; }
+.viz-col-icon.datetime { background: #e6f4ea; }
+.viz-col-icon.text { background: #f4f3ef; }
+
+.viz-col-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.viz-col-type-label {
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --- Chart Grid --- */
+
+.viz-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  align-content: start;
+  min-width: 0;
+}
+
+.viz-grid.cols-1 {
+  grid-template-columns: 1fr;
+}
+
+/* --- Chart Panel --- */
+
+.viz-panel {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.viz-panel:hover {
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.07);
+}
+
+.viz-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #faf9f7;
+  flex-wrap: wrap;
+}
+
+.viz-panel-header .chart-select {
+  min-width: 0;
+  width: auto;
+  flex: 1;
+  padding: 6px 28px 6px 8px;
+  font-size: 12px;
+}
+
+.viz-panel-header .chart-label {
+  font-size: 10px;
+  margin-bottom: 0;
+}
+
+.viz-panel-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.viz-panel-gen-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.viz-panel-gen-btn:hover:not(:disabled) {
+  background: #145369;
+  transform: translateY(-1px);
+}
+
+.viz-panel-gen-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.viz-panel-remove-btn {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.viz-panel-remove-btn:hover {
+  color: var(--flag);
+  background: var(--flag-soft);
+}
+
+.viz-panel-body {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+}
+
+.viz-panel-meta {
+  padding: 6px 14px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-soft);
+  text-align: right;
+  letter-spacing: 0.02em;
+  border-top: 1px solid #f0efeb;
+}
+
+/* --- Empty Placeholder Panel --- */
+
+.viz-placeholder {
+  background: white;
+  border: 1.5px dashed var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  gap: 10px;
+}
+
+.viz-placeholder:hover {
+  border-color: var(--accent);
+  background: rgba(28, 110, 140, 0.02);
+  transform: translateY(-2px);
+}
+
+.viz-placeholder-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--accent);
+  transition: transform 0.2s ease;
+}
+
+.viz-placeholder:hover .viz-placeholder-icon {
+  transform: scale(1.08);
+}
+
+.viz-placeholder-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.viz-placeholder-hint {
+  font-size: 11px;
+  color: var(--ink-soft);
+  opacity: 0.7;
+}
+
+/* --- Panel Error --- */
+
+.viz-panel-error {
+  padding: 12px 16px;
+  background: var(--flag-soft);
+  border: 1px solid var(--flag);
+  color: var(--flag);
+  border-radius: 4px;
+  font-size: 12px;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* --- Responsive: stack sidebar on narrow screens --- */
+
+@media (max-width: 900px) {
+  .viz-workspace {
+    flex-direction: column;
+  }
+
+  .viz-sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .viz-col-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .viz-col-item {
+    padding: 6px 10px;
+  }
+
+  .viz-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Override page max-width when Visualize tab is active */
+.page.viz-active {
+  max-width: 1400px;
 }

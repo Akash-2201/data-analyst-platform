@@ -279,6 +279,34 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         "severity": "medium",
                     })
 
+        # Phase 4b: Fallback — detect currency/comma-formatted numeric columns that profiling typed as text
+        # This catches columns like "Revenue" containing "₹1,500" where pd.to_numeric() alone fails,
+        # causing the profiler to label them as "text" instead of "numeric".
+        elif not is_phone_col and not is_email_col and (
+            inferred_type in ("text", "categorical")
+            and str(col_series.dtype) == "object"
+        ):
+            non_null = col_series.dropna()
+            if len(non_null) >= 2:
+                cleaned_vals = non_null.apply(clean_numeric_value)
+                coerced_vals = pd.to_numeric(cleaned_vals, errors="coerce")
+                valid_count = int(coerced_vals.notna().sum())
+                # If ≥50% of non-null values become valid numbers after stripping
+                # currency symbols and commas, this is a numeric column in disguise
+                if valid_count >= max(2, len(non_null) * 0.5):
+                    # Check that raw pd.to_numeric would actually fail on some values
+                    # (otherwise there's nothing to clean and no suggestion needed)
+                    raw_coerced = pd.to_numeric(non_null, errors="coerce")
+                    raw_valid = int(raw_coerced.notna().sum())
+                    if raw_valid < valid_count:
+                        suggestions.append({
+                            "id": str(uuid.uuid4()),
+                            "action": "coerce_numeric",
+                            "params": {"column": col_name},
+                            "description": f"Convert '{col_name}' to numeric (strip currency symbols and commas)",
+                            "severity": "medium",
+                        })
+
         # Phase 3b: Negative values in non_negative_numeric columns (excluding phone)
         if not is_phone_col and not is_email_col and inferred_type == "non_negative_numeric":
             coerced_nums = pd.to_numeric(col_series.apply(clean_numeric_value), errors="coerce")

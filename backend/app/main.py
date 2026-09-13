@@ -400,7 +400,7 @@ def preview_cleaning_pipeline(
 @app.get("/datasets/{dataset_id}/download-cleaned")
 def download_cleaned_dataset(
     dataset_id: str,
-    format: str = Query("csv", regex="^(csv|xlsx)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx)$"),
     db: Session = Depends(get_db),
 ) -> Response:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
@@ -439,16 +439,28 @@ def download_cleaned_dataset(
             except Exception:  # noqa: BLE001
                 pass
 
-            # Auto-size each column's width based on content
-            for col_idx, col_name in enumerate(cleaned_df.columns, start=1):
-                col_letter = get_column_letter(col_idx)
-                header_len = len(str(col_name))
-                val_lens = [
-                    len(str(v)) for v in cleaned_df[col_name].dropna()
-                ] if not cleaned_df.empty else [0]
-                max_len = max([header_len] + val_lens) if val_lens else header_len
-                # Set width with padding (+3) and a minimum width of 12 so text is never truncated
-                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+            # Auto-size each column's width based on content (sample first 500 rows for perf).
+            # Wrapped in try/except so column-width failures never prevent the download.
+            try:
+                sample_df = cleaned_df.head(500)
+                for col_idx, col_name in enumerate(cleaned_df.columns, start=1):
+                    col_letter = get_column_letter(col_idx)
+                    header_len = len(str(col_name))
+                    # Cast every value to str; skip NaN/None via dropna()
+                    if not sample_df.empty:
+                        val_lens = [
+                            len(str(v)) for v in sample_df[col_name].dropna()
+                        ]
+                    else:
+                        val_lens = []
+                    max_len = max([header_len] + val_lens) if val_lens else header_len
+                    # Cap at 50 to avoid absurdly wide columns from long text values
+                    # Min of 12 ensures narrow columns are still readable
+                    ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+            except Exception:  # noqa: BLE001
+                # If column-width auto-sizing fails for any reason, the Excel file
+                # is still valid — just with default column widths.
+                pass
 
         content = output.getvalue()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
