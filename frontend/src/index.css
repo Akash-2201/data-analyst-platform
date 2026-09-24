@@ -1,15 +1,27 @@
 :root {
-  --paper: #faf9f5;
-  --ink: #171714;
-  --ink-soft: #55534a;
-  --line: #dcd8cc;
-  --accent: #1c6e8c;
-  --accent-soft: #e4eef1;
-  --flag: #b0472b;
-  --flag-soft: #f6e7e2;
-  --good: #3a6b45;
-  --font-body: "Inter", -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", "SF Mono", monospace;
+  --paper: #FAFAFA;
+  --ink: #18181B;
+  --ink-soft: #71717A;
+  --line: #E4E4E7;
+  --surface: #FFFFFF;
+  --surface-alt: #F4F4F5;
+  --accent: #6366F1;
+  --accent-hover: #4F46E5;
+  --accent-soft: #EEF2FF;
+  --flag: #E11D48;
+  --flag-soft: #FFF1F2;
+  --good: #16A34A;
+  --good-soft: #F0FDF4;
+  --warn: #D97706;
+  --warn-soft: #FFFBEB;
+  --font-body: "Inter", -apple-system, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12);
 }
 
 * {
@@ -21,8 +33,29 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 a {
   color: var(--accent);
+}
+
+/* Slim, elegant scrollbar globally */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #A1A1AA;
 }

@@ -6,8 +6,11 @@ import {
   LineChart, Line,
   ScatterChart, Scatter,
   PieChart, Pie, Cell,
+  AreaChart, Area,
+  Treemap,
+  FunnelChart, Funnel, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer,
+  ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import {
   uploadDataset,
@@ -329,6 +332,7 @@ function QualityBars({ column }) {
 }
 
 function ColumnRow({ column, index }) {
+  const samplePreview = column.sample_values.join(", ");
   return (
     <div className="column-row" style={{ animationDelay: `${index * 50}ms` }}>
       <div className="name-cell">
@@ -337,13 +341,10 @@ function ColumnRow({ column, index }) {
       </div>
       <div className="dtype">{column.dtype}</div>
       <QualityBars column={column} />
-      <div className="samples-cell">
-        {column.sample_values.map((v, i) => (
-          <span className="sample-chip" key={i} title={v}>
-            {v}
-          </span>
-        ))}
+      <div className="samples-cell" title={samplePreview}>
+        {samplePreview}
       </div>
+      <button className="column-action-menu" title="Actions" onClick={(e) => e.stopPropagation()}>⋯</button>
     </div>
   );
 }
@@ -352,8 +353,8 @@ function ColumnRow({ column, index }) {
 // Chart colours — a curated palette that works on white
 // ---------------------------------------------------------------------------
 const CHART_COLORS = [
-  "#1c6e8c", "#3aaa7d", "#e05a4b", "#f5a623", "#7b68ee",
-  "#20b2aa", "#ff7f50", "#9370db", "#32cd32", "#ff69b4",
+  "#6366F1", "#38BDF8", "#34D399", "#FBBF24", "#A78BFA",
+  "#F472B6", "#FB923C", "#2DD4BF", "#818CF8", "#F87171",
 ];
 
 // ---------------------------------------------------------------------------
@@ -371,15 +372,42 @@ function renderSharedHistogram(chartData) {
         <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
         <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
         <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
-        <Bar dataKey="value" name={x_label} fill="#1c6e8c" radius={[2, 2, 0, 0]} maxBarSize={60} />
+        <Bar dataKey="value" name={x_label} fill="#6366F1" radius={[2, 2, 0, 0]} maxBarSize={60} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-function renderSharedStackedBar(chartData) {
+const CHART_GALLERY_TYPES = [
+  // Standard
+  { id: "bar", name: "Bar Chart", icon: "📊", cat: "Standard", desc: "Category comparison" },
+  { id: "line", name: "Line Chart", icon: "📈", cat: "Standard", desc: "Trends over time / sequence" },
+  { id: "scatter", name: "Scatter Plot", icon: "🟣", cat: "Standard", desc: "Correlation between two metrics" },
+  { id: "pie", name: "Pie Chart", icon: "🥧", cat: "Standard", desc: "Proportion of whole" },
+  { id: "histogram", name: "Histogram", icon: "📶", cat: "Standard", desc: "Value frequency distribution" },
+  { id: "box_plot", name: "Box Plot", icon: "📦", cat: "Standard", desc: "Quartiles, medians & outliers" },
+  // Composition & Structure
+  { id: "stacked_bar", name: "Stacked Bar", icon: "🧱", cat: "Composition", desc: "Multi-category segmented totals" },
+  { id: "stacked_bar_100", name: "100% Stacked Bar", icon: "💯", cat: "Composition", desc: "Normalized percentage shares" },
+  { id: "area", name: "Area Chart", icon: "🏔️", cat: "Composition", desc: "Cumulative filled volume trend" },
+  { id: "treemap", name: "Treemap", icon: "🗂️", cat: "Composition", desc: "Hierarchical rectangle size breakdown" },
+  // Flow & Performance
+  { id: "waterfall", name: "Waterfall Chart", icon: "🌊", cat: "Flow & Performance", desc: "Sequential positive/negative impact" },
+  { id: "funnel", name: "Funnel Chart", icon: "⏳", cat: "Flow & Performance", desc: "Sequential stage drop-off" },
+  { id: "heatmap", name: "Correlation Heatmap", icon: "🌡️", cat: "Flow & Performance", desc: "All-numeric correlation matrix (-1 to +1)" },
+  { id: "kpi", name: "KPI / Metric Card", icon: "💎", cat: "Flow & Performance", desc: "Single high-impact stat card" },
+  // Forecasting
+  { id: "forecast_line", name: "Forecast Line", icon: "🔮", cat: "Forecasting", desc: "Linear regression trend projection" },
+  { id: "forecast_ci", name: "Forecast + CI", icon: "🎯", cat: "Forecasting", desc: "Trend with 95% confidence band" },
+  { id: "forecast_actual", name: "Actual vs Forecast", icon: "⚖️", cat: "Forecasting", desc: "Historical fit & R² goodness score" },
+  { id: "forecast_residual", name: "Forecast Residuals", icon: "📉", cat: "Forecasting", desc: "Prediction error variance" },
+  // Spatial
+  { id: "map", name: "Geographic Map", icon: "🗺️", cat: "Spatial", desc: "Latitude & longitude coordinate scatter" },
+];
+
+function renderSharedStackedBar(chartData, is100 = false) {
   if (!chartData || !chartData.series) return null;
-  const { labels, series } = chartData;
+  const { labels, series, raw_series } = chartData;
   const data = labels.map((label, i) => {
     const row = { label: String(label) };
     series.forEach((s) => { row[s.name] = s.data[i] ?? 0; });
@@ -390,8 +418,23 @@ function renderSharedStackedBar(chartData) {
       <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+        <YAxis
+          tick={{ fontSize: 11, fill: "var(--ink-soft)" }}
+          domain={is100 ? [0, 100] : ["auto", "auto"]}
+          unit={is100 ? "%" : ""}
+        />
+        <Tooltip
+          contentStyle={{ fontSize: 12, borderRadius: 4 }}
+          formatter={(v, name, item) => {
+            if (is100) {
+              const rowIdx = labels.indexOf(item.payload.label);
+              const rawS = raw_series?.find((s) => s.name === name);
+              const rawCount = rawS?.data?.[rowIdx];
+              return [`${v}% ${rawCount !== undefined ? `(${rawCount.toLocaleString()} items)` : ""}`, name];
+            }
+            return [v.toLocaleString(), name];
+          }}
+        />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         {series.map((s, i) => (
           <Bar
@@ -403,6 +446,427 @@ function renderSharedStackedBar(chartData) {
           />
         ))}
       </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedArea(chartData) {
+  if (!chartData) return null;
+  const { labels, values, x_label, y_label } = chartData;
+  const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <AreaChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }}>
+        <defs>
+          <linearGradient id="areaFillGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#6366F1" stopOpacity={0.65} />
+            <stop offset="95%" stopColor="#6366F1" stopOpacity={0.05} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Area type="monotone" dataKey="value" name={y_label} stroke="#6366F1" strokeWidth={2.5} fillOpacity={1} fill="url(#areaFillGrad)" />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedTreemap(chartData) {
+  if (!chartData) return null;
+  const { labels, values } = chartData;
+  const data = labels.map((l, i) => ({
+    name: String(l),
+    size: Math.max(0, values[i] ?? 0),
+    value: values[i] ?? 0,
+  })).filter((d) => d.size > 0);
+
+  const CustomizedTreemapContent = (props) => {
+    const { x, y, width, height, index, name, value } = props;
+    if (width < 28 || height < 18) return null;
+    return (
+      <g>
+        <rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          style={{
+            fill: CHART_COLORS[index % CHART_COLORS.length],
+            stroke: "#fff",
+            strokeWidth: 2,
+            rx: 3,
+            ry: 3,
+          }}
+        />
+        {width > 44 && height > 28 && (
+          <>
+            <text x={x + width / 2} y={y + height / 2 - 4} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={600}>
+              {name.length > 14 ? `${name.slice(0, 12)}…` : name}
+            </text>
+            <text x={x + width / 2} y={y + height / 2 + 12} textAnchor="middle" fill="rgba(255,255,255,0.85)" fontSize={10}>
+              {typeof value === "number" ? value.toLocaleString() : value}
+            </text>
+          </>
+        )}
+      </g>
+    );
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <Treemap
+        data={data}
+        dataKey="size"
+        nameKey="name"
+        stroke="#fff"
+        content={<CustomizedTreemapContent />}
+      >
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Value"]} />
+      </Treemap>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedWaterfall(chartData) {
+  if (!chartData || !chartData.items) return null;
+  const { items, y_label } = chartData;
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <BarChart data={items} margin={{ top: 14, right: 24, left: 8, bottom: 72 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+        <Tooltip
+          contentStyle={{ fontSize: 12, borderRadius: 4 }}
+          formatter={(v, name, entry) => {
+            const it = entry.payload;
+            if (name === "base") return null;
+            return [
+              `${it.delta >= 0 ? "+" : ""}${it.delta.toLocaleString()} (Total: ${it.end.toLocaleString()})`,
+              it.is_total ? "Final Total" : "Delta",
+            ];
+          }}
+        />
+        <Bar dataKey="base" stackId="wf" fill="transparent" />
+        <Bar dataKey="span" stackId="wf" radius={[2, 2, 2, 2]}>
+          {items.map((it, idx) => {
+            let fill = "#2a9d8f";
+            if (it.is_total) fill = "#1c6e8c";
+            else if (!it.is_positive) fill = "#e05a4b";
+            return <Cell key={idx} fill={fill} />;
+          })}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedFunnel(chartData) {
+  if (!chartData) return null;
+  const { labels, values } = chartData;
+  const data = labels.map((l, i) => ({
+    name: String(l),
+    value: values[i] ?? 0,
+    fill: CHART_COLORS[i % CHART_COLORS.length],
+  }));
+
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <FunnelChart margin={{ top: 14, right: 30, left: 30, bottom: 14 }}>
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
+        <Funnel dataKey="value" data={data} isAnimationActive>
+          <LabelList position="right" fill="var(--ink)" stroke="none" dataKey="name" fontSize={11} />
+        </Funnel>
+      </FunnelChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderSharedHeatmap(chartData) {
+  if (!chartData || !chartData.matrix) return null;
+  const { cols, matrix } = chartData;
+  return (
+    <div className="heatmap-container">
+      <table className="heatmap-table">
+        <thead>
+          <tr>
+            <th className="heatmap-corner"></th>
+            {cols.map((c) => (
+              <th key={c} className="heatmap-th" title={c}>
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cols.map((rowName, rIdx) => (
+            <tr key={rowName}>
+              <td className="heatmap-row-header" title={rowName}>
+                {rowName}
+              </td>
+              {cols.map((colName, cIdx) => {
+                const val = matrix[rIdx]?.[cIdx] ?? 0;
+                const absVal = Math.min(1, Math.abs(val));
+                let bg = "rgba(240, 238, 234, 0.4)";
+                let textColor = "var(--ink)";
+                if (val > 0.001) {
+                  bg = `rgba(28, 110, 140, ${0.12 + absVal * 0.78})`;
+                  if (absVal > 0.5) textColor = "#ffffff";
+                } else if (val < -0.001) {
+                  bg = `rgba(224, 90, 75, ${0.12 + absVal * 0.78})`;
+                  if (absVal > 0.5) textColor = "#ffffff";
+                }
+                return (
+                  <td
+                    key={colName}
+                    className="heatmap-cell"
+                    style={{ backgroundColor: bg, color: textColor }}
+                    title={`${rowName} ↔ ${colName}: ${val.toFixed(3)}`}
+                  >
+                    {val.toFixed(2)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function renderSharedKPI(chartData) {
+  if (!chartData) return null;
+  const { column, metric, value, stats } = chartData;
+  const fmt = (v) => {
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "number") {
+      if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+      if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
+      return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+    }
+    return String(v);
+  };
+
+  return (
+    <div className="kpi-card-wrapper">
+      <div className="kpi-metric-badge">{String(metric).toUpperCase()}</div>
+      <div className="kpi-main-val">{fmt(value)}</div>
+      <div className="kpi-col-name">{column}</div>
+
+      {stats && (
+        <div className="kpi-stats-grid">
+          {stats.min !== undefined && (
+            <div className="kpi-stat-item">
+              <span className="kpi-stat-lbl">Min</span>
+              <span className="kpi-stat-val">{fmt(stats.min)}</span>
+            </div>
+          )}
+          {stats.median !== undefined && (
+            <div className="kpi-stat-item">
+              <span className="kpi-stat-lbl">Median</span>
+              <span className="kpi-stat-val">{fmt(stats.median)}</span>
+            </div>
+          )}
+          {stats.max !== undefined && (
+            <div className="kpi-stat-item">
+              <span className="kpi-stat-lbl">Max</span>
+              <span className="kpi-stat-val">{fmt(stats.max)}</span>
+            </div>
+          )}
+          <div className="kpi-stat-item">
+            <span className="kpi-stat-lbl">Unique</span>
+            <span className="kpi-stat-val">{stats.unique?.toLocaleString()}</span>
+          </div>
+          <div className="kpi-stat-item">
+            <span className="kpi-stat-lbl">Count</span>
+            <span className="kpi-stat-val">{stats.count?.toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderSharedForecastLine(chartData) {
+  if (!chartData || !chartData.history) return null;
+  const { history, future, metrics, y_label } = chartData;
+  const combined = [
+    ...history.map((h) => ({ date: h.date, actual: h.actual, forecast: null })),
+    ...(history.length > 0 ? [{ date: history[history.length - 1].date, actual: history[history.length - 1].actual, forecast: history[history.length - 1].actual }] : []),
+    ...future.map((f) => ({ date: f.date, actual: null, forecast: f.forecast })),
+  ];
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 10px 6px" }}>
+        <span className="forecast-header-badge">🔮 Simple Linear Trend Projection</span>
+        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-soft)" }}>
+          Slope: {metrics?.slope > 0 ? `+${metrics.slope}` : metrics?.slope}/step · Fit R²: {metrics?.r2}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={310}>
+        <LineChart data={combined} margin={{ top: 8, right: 24, left: 8, bottom: 64 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Line type="monotone" dataKey="actual" name={`Historical ${y_label}`} stroke="#6366F1" strokeWidth={2.5} dot={{ r: 3, fill: "#6366F1" }} connectNulls={false} />
+          <Line type="monotone" dataKey="forecast" name={`Projected Trend (+${future.length} pts)`} stroke="#F87171" strokeWidth={2.5} strokeDasharray="5 5" dot={{ r: 4, fill: "#F87171" }} connectNulls={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function renderSharedForecastCI(chartData) {
+  if (!chartData || !chartData.history) return null;
+  const { history, future, metrics, y_label } = chartData;
+  const combined = [
+    ...history.map((h) => ({ date: h.date, actual: h.actual, forecast: null, ci_lower: null, ci_upper: null })),
+    ...(history.length > 0 ? [{
+      date: history[history.length - 1].date,
+      actual: history[history.length - 1].actual,
+      forecast: history[history.length - 1].actual,
+      ci_lower: history[history.length - 1].actual,
+      ci_upper: history[history.length - 1].actual,
+    }] : []),
+    ...future.map((f) => ({
+      date: f.date,
+      actual: null,
+      forecast: f.forecast,
+      ci_lower: f.ci_lower,
+      ci_upper: f.ci_upper,
+    })),
+  ];
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 10px 6px" }}>
+        <span className="forecast-header-badge">🎯 Trend Projection ± 95% Confidence Band</span>
+        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-soft)" }}>
+          Std Error: {metrics?.se} · R²: {metrics?.r2}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={310}>
+        <AreaChart data={combined} margin={{ top: 8, right: 24, left: 8, bottom: 64 }}>
+          <defs>
+            <linearGradient id="ciGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#F87171" stopOpacity={0.25} />
+              <stop offset="95%" stopColor="#F87171" stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Area type="monotone" dataKey="ci_upper" name="95% CI Upper" stroke="rgba(224, 90, 75, 0.4)" fill="url(#ciGrad)" />
+          <Area type="monotone" dataKey="ci_lower" name="95% CI Lower" stroke="rgba(224, 90, 75, 0.4)" fill="#ffffff" />
+          <Line type="monotone" dataKey="actual" name={`Historical ${y_label}`} stroke="#6366F1" strokeWidth={2.5} dot={{ r: 3, fill: "#6366F1" }} connectNulls={false} />
+          <Line type="monotone" dataKey="forecast" name="Forecast Projection" stroke="#F87171" strokeWidth={2.5} strokeDasharray="5 5" dot={{ r: 4, fill: "#F87171" }} connectNulls={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function renderSharedForecastActual(chartData) {
+  if (!chartData || !chartData.history) return null;
+  const { history, metrics, y_label } = chartData;
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 10px 6px" }}>
+        <span className="forecast-header-badge">⚖️ Historical Actual vs Regression Fit</span>
+        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-soft)" }}>
+          Goodness of Fit R²: <strong>{metrics?.r2}</strong>
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={310}>
+        <LineChart data={history} margin={{ top: 8, right: 24, left: 8, bottom: 64 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Line type="monotone" dataKey="actual" name={`Actual ${y_label}`} stroke="#6366F1" strokeWidth={2.5} dot={{ r: 3, fill: "#6366F1" }} />
+          <Line type="monotone" dataKey="fitted" name="Fitted Regression Line" stroke="#FBBF24" strokeWidth={2} strokeDasharray="4 4" dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function renderSharedForecastResidual(chartData) {
+  if (!chartData || !chartData.history) return null;
+  const { history, metrics } = chartData;
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 10px 6px" }}>
+        <span className="forecast-header-badge">📉 Residual Error (Actual − Fitted)</span>
+        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-soft)" }}>
+          Residual SE: {metrics?.se}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={310}>
+        <BarChart data={history} margin={{ top: 8, right: 24, left: 8, bottom: 64 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
+          <ReferenceLine y={0} stroke="#888" strokeWidth={1.5} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v, "Residual Error"]} />
+          <Bar dataKey="residual" name="Residual (Error)" radius={[2, 2, 2, 2]}>
+            {history.map((entry, idx) => (
+              <Cell key={idx} fill={entry.residual >= 0 ? "#1c6e8c" : "#e05a4b"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function renderSharedMap(chartData) {
+  if (!chartData) return null;
+  if (chartData.deferred) {
+    return (
+      <div className="map-deferred-card">
+        <div className="map-deferred-icon">🗺️</div>
+        <div className="map-deferred-title">Geographic Map Deferred</div>
+        <div className="map-deferred-desc">{chartData.message}</div>
+        <div className="map-deferred-note">
+          To enable spatial plotting, ensure your dataset contains explicit latitude and longitude columns.
+        </div>
+      </div>
+    );
+  }
+  const { points, x_label, y_label } = chartData;
+  const scatterData = points.map((p) => ({
+    x: p.lon,
+    y: p.lat,
+    label: p.label,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={340}>
+      <ScatterChart margin={{ top: 12, right: 24, left: 12, bottom: 40 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+        <XAxis dataKey="x" type="number" name={x_label} unit="°" tick={{ fontSize: 11 }} label={{ value: `Longitude (${x_label})`, position: "bottom", offset: 15, fontSize: 11 }} />
+        <YAxis dataKey="y" type="number" name={y_label} unit="°" tick={{ fontSize: 11 }} label={{ value: `Latitude (${y_label})`, angle: -90, position: "left", offset: 0, fontSize: 11 }} />
+        <Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ payload }) => {
+          if (!payload?.length) return null;
+          const pt = payload[0]?.payload;
+          return (
+            <div className="chart-scatter-tooltip">
+              <div className="chart-scatter-tooltip-label">{pt.label}</div>
+              <div>Lat: {pt.y}°</div>
+              <div>Lon: {pt.x}°</div>
+            </div>
+          );
+        }} />
+        <Scatter name="Locations" data={scatterData} fill="#6366F1" opacity={0.75} />
+      </ScatterChart>
     </ResponsiveContainer>
   );
 }
@@ -460,14 +924,14 @@ function renderSharedBoxPlot(chartData) {
 
           return (
             <g key={i}>
-              <line x1={cx} y1={yQ3} x2={cx} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
-              <line x1={cx - capW} y1={yMax} x2={cx + capW} y2={yMax} stroke="#1c6e8c" strokeWidth={1.5} />
-              <line x1={cx} y1={yQ1} x2={cx} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
-              <line x1={cx - capW} y1={yMin} x2={cx + capW} y2={yMin} stroke="#1c6e8c" strokeWidth={1.5} />
+              <line x1={cx} y1={yQ3} x2={cx} y2={yMax} stroke="#6366F1" strokeWidth={1.5} />
+              <line x1={cx - capW} y1={yMax} x2={cx + capW} y2={yMax} stroke="#6366F1" strokeWidth={1.5} />
+              <line x1={cx} y1={yQ1} x2={cx} y2={yMin} stroke="#6366F1" strokeWidth={1.5} />
+              <line x1={cx - capW} y1={yMin} x2={cx + capW} y2={yMin} stroke="#6366F1" strokeWidth={1.5} />
               <rect x={cx - BOX_HALF} y={yQ3} width={BOX_HALF * 2} height={Math.max(1, yQ1 - yQ3)}
-                fill="rgba(28,110,140,0.13)" stroke="#1c6e8c" strokeWidth={1.5} rx={2} />
-              <line x1={cx - BOX_HALF} y1={yMed} x2={cx + BOX_HALF} y2={yMed} stroke="#1c6e8c" strokeWidth={2.5} />
-              <text x={cx + BOX_HALF + 4} y={yMed} dominantBaseline="middle" fontSize={9} fill="#1c6e8c">{fmtNum(stat.median)}</text>
+                fill="rgba(28,110,140,0.13)" stroke="#6366F1" strokeWidth={1.5} rx={2} />
+              <line x1={cx - BOX_HALF} y1={yMed} x2={cx + BOX_HALF} y2={yMed} stroke="#6366F1" strokeWidth={2.5} />
+              <text x={cx + BOX_HALF + 4} y={yMed} dominantBaseline="middle" fontSize={9} fill="#6366F1">{fmtNum(stat.median)}</text>
               <text x={cx} y={PAD_TOP + PLOT_H + 18} textAnchor="middle" fontSize={11} fill="#666">
                 {label.length > 13 ? `${label.slice(0, 12)}…` : label}
               </text>
@@ -482,8 +946,20 @@ function renderSharedBoxPlot(chartData) {
 function renderSharedChart(chartData, chartType) {
   if (!chartData) return null;
   if (chartType === "histogram") return renderSharedHistogram(chartData);
-  if (chartType === "stacked_bar") return renderSharedStackedBar(chartData);
+  if (chartType === "stacked_bar") return renderSharedStackedBar(chartData, false);
+  if (chartType === "stacked_bar_100") return renderSharedStackedBar(chartData, true);
   if (chartType === "box_plot") return renderSharedBoxPlot(chartData);
+  if (chartType === "area") return renderSharedArea(chartData);
+  if (chartType === "treemap") return renderSharedTreemap(chartData);
+  if (chartType === "waterfall") return renderSharedWaterfall(chartData);
+  if (chartType === "funnel") return renderSharedFunnel(chartData);
+  if (chartType === "heatmap") return renderSharedHeatmap(chartData);
+  if (chartType === "kpi") return renderSharedKPI(chartData);
+  if (chartType === "forecast_line") return renderSharedForecastLine(chartData);
+  if (chartType === "forecast_ci") return renderSharedForecastCI(chartData);
+  if (chartType === "forecast_actual") return renderSharedForecastActual(chartData);
+  if (chartType === "forecast_residual") return renderSharedForecastResidual(chartData);
+  if (chartType === "map") return renderSharedMap(chartData);
 
   const { labels, values, x_label, y_label } = chartData;
 
@@ -513,7 +989,7 @@ function renderSharedChart(chartData, chartType) {
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
           <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
           <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, y_label]} />
-          <Bar dataKey="value" name={y_label} fill="#1c6e8c" radius={[3, 3, 0, 0]} maxBarSize={48} />
+          <Bar dataKey="value" name={y_label} fill="#6366F1" radius={[3, 3, 0, 0]} maxBarSize={48} />
         </BarChart>
       </ResponsiveContainer>
     );
@@ -548,7 +1024,7 @@ function renderSharedChart(chartData, chartType) {
             if (!pt) return null;
             return (<div className="chart-scatter-tooltip"><div className="chart-scatter-tooltip-label">{pt.label}</div><div>{y_label}: {typeof pt.y === "number" ? pt.y.toLocaleString() : pt.y}</div></div>);
           }} />
-          <Scatter name={y_label} data={scatterData} fill="#1c6e8c" opacity={0.8} />
+          <Scatter name={y_label} data={scatterData} fill="#6366F1" opacity={0.8} />
         </ScatterChart>
       </ResponsiveContainer>
     );
@@ -793,30 +1269,59 @@ function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
 // ---------------------------------------------------------------------------
 // ChartPanel — a single independently-configurable chart slot in the Visualize workspace
 // ---------------------------------------------------------------------------
-const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, onRemove }, ref) {
+// ---------------------------------------------------------------------------
+// ChartPanel — a single independently-configurable chart slot in the Visualize workspace
+// ---------------------------------------------------------------------------
+const ChartPanel = forwardRef(function ChartPanel(
+  { id, index, datasetId, columns, onRemove, chartType: initialType, onSelectType, isFocused, onFocus, onConfigChange },
+  ref
+) {
   const panelRef = useRef(null);
-  // Expose the DOM node to the parent via the forwarded ref
   useImperativeHandle(ref, () => panelRef.current);
 
   const allCols = columns || [];
-  const catCols = allCols.filter((c) => isCategoricalType(c.inferred_type, c.dtype));
-  const numCols = allCols.filter((c) => isNumericType(c.inferred_type, c.dtype));
-
-  const defaultX = (catCols[0] || allCols[0])?.name || "";
-  const defaultY = numCols[0]?.name || "";
-
-  const [chartType, setChartType] = useState("bar");
-  const [xCol, setXCol] = useState(defaultX);
-  const [yCol, setYCol] = useState(defaultY);
-  const [stackCol, setStackCol] = useState((catCols[1] || catCols[0])?.name || "");
+  const [chartType, setChartType] = useState(initialType || "bar");
+  const [xCol, setXCol] = useState(allCols[0]?.name || "");
+  const [yCol, setYCol] = useState(allCols.length > 1 ? allCols[1]?.name : allCols[0]?.name || "");
+  const [stackCol, setStackCol] = useState(allCols.length > 1 ? allCols[1]?.name : "");
   const [agg, setAgg] = useState("count");
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  const needsY = chartType === "line" || chartType === "scatter" || (chartType === "bar" && agg !== "count");
-  const needsStack = chartType === "stacked_bar";
-  const isHistOrBox = chartType === "histogram" || chartType === "box_plot";
+  // Sync if parent updates initialType
+  useEffect(() => {
+    if (initialType && initialType !== chartType) {
+      setChartType(initialType);
+      doFetch({ chartType: initialType });
+    }
+  }, [initialType]);
+
+  // Report config to parent for PDF title generation
+  useEffect(() => {
+    onConfigChange?.(id, { chartType, xCol, yCol, stackCol, agg });
+  }, [id, chartType, xCol, yCol, stackCol, agg]);
+
+  const isForecast = chartType.startsWith("forecast_");
+  const isHeatmap = chartType === "heatmap";
+  const isKPI = chartType === "kpi";
+  const isMap = chartType === "map";
+  const isHist = chartType === "histogram";
+  const isBox = chartType === "box_plot";
+  const isStack = chartType === "stacked_bar" || chartType === "stacked_bar_100";
+  const isWaterfall = chartType === "waterfall";
+
+  const needsY =
+    isForecast ||
+    chartType === "line" ||
+    chartType === "scatter" ||
+    chartType === "area" ||
+    isWaterfall ||
+    (chartType === "bar" && agg !== "count") ||
+    (isKPI && (agg === "sum" || agg === "mean"));
+
+  const needsStack = isStack;
 
   const doFetch = async (overrides = {}) => {
     const ct = overrides.chartType ?? chartType;
@@ -825,111 +1330,172 @@ const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, o
     const sc = overrides.stackCol ?? stackCol;
     const ag = overrides.agg ?? agg;
 
-    if (!datasetId || !xc) return;
-    const needsYNow = ct === "line" || ct === "scatter" || (ct === "bar" && ag !== "count");
-    if (needsYNow && !yc) return;
-    if (ct === "stacked_bar" && !sc) return;
+    if (!datasetId) return;
+    if (!isHeatmap && !xc) return;
 
     setLoading(true);
     setError(null);
     try {
       let fetchY;
-      if (ct === "stacked_bar") fetchY = sc;
-      else if (needsYNow) fetchY = yc;
+      if (ct === "stacked_bar" || ct === "stacked_bar_100") fetchY = sc;
+      else if (ct === "kpi") fetchY = yc || xc;
       else if (ct === "box_plot" && yc) fetchY = yc;
+      else if (ct.startsWith("forecast_") || ct === "line" || ct === "scatter" || ct === "area" || ct === "waterfall" || (ct === "bar" && ag !== "count")) fetchY = yc;
+      else if (ct === "map" && yc) fetchY = yc;
       else fetchY = undefined;
 
       const data = await getChartData(datasetId, {
-        chartType: ct, x: xc, y: fetchY, agg: ag, useCleaned: true,
+        chartType: ct,
+        x: xc,
+        y: fetchY,
+        agg: ag,
+        useCleaned: true,
       });
       setChartData(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Failed to generate chart.");
       setChartData(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleChartTypeChange = (e) => {
-    const newType = e.target.value;
+  // Auto-fetch on mount
+  useEffect(() => {
+    if (datasetId && (xCol || isHeatmap)) {
+      doFetch();
+    }
+  }, []);
+
+  const handleTypeChange = (newType) => {
     setChartType(newType);
-    const defaultNumX = numCols[0]?.name || "";
-    if ((newType === "histogram" || newType === "box_plot") && defaultNumX) {
-      if (!numCols.find((c) => c.name === xCol)) setXCol(defaultNumX);
-    }
-    if (newType === "stacked_bar") {
-      if (catCols.length > 0 && !catCols.find((c) => c.name === xCol))
-        setXCol(catCols[0]?.name || xCol);
-      setStackCol(catCols[1]?.name || catCols[0]?.name || "");
-    }
-    if ((newType === "line" || newType === "scatter") && !yCol && defaultY) {
-      setYCol(defaultY);
-    }
+    onSelectType?.(newType);
+    doFetch({ chartType: newType });
   };
 
   return (
-    <div className="viz-panel" ref={panelRef}>
+    <div
+      className={`viz-panel${isFocused ? " focused" : ""}${isDragOver ? " drag-over" : ""}`}
+      ref={panelRef}
+      onClick={onFocus}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setIsDragOver(true);
+      }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const droppedType = e.dataTransfer.getData("text/plain");
+        if (droppedType) {
+          handleTypeChange(droppedType);
+        }
+      }}
+    >
       <div className="viz-panel-header">
-        <div className="viz-panel-ctrl">
-          <label className="chart-label">Type</label>
-          <select className="chart-select" value={chartType} onChange={handleChartTypeChange}>
-            <option value="bar">Bar</option>
-            <option value="line">Line</option>
-            <option value="scatter">Scatter</option>
-            <option value="pie">Pie</option>
-            <option value="histogram">Histogram</option>
-            <option value="stacked_bar">Stacked Bar</option>
-            <option value="box_plot">Box Plot</option>
-          </select>
-        </div>
-
-        <div className="viz-panel-ctrl">
-          <label className="chart-label">{isHistOrBox ? "Column" : "X axis"}</label>
-          <select className="chart-select" value={xCol} onChange={(e) => setXCol(e.target.value)}>
-            {(isHistOrBox ? (numCols.length > 0 ? numCols : allCols) : allCols).map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
+        <div className="viz-panel-ctrl" style={{ minWidth: 140 }}>
+          <label className="chart-label">Chart Type</label>
+          <select
+            className="chart-select"
+            value={chartType}
+            onChange={(e) => handleTypeChange(e.target.value)}
+          >
+            {CHART_GALLERY_TYPES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.icon} {t.name}
+              </option>
             ))}
           </select>
         </div>
 
-        {needsY && (
+        {/* Primary / X Column (Lists ALL columns - Phase 6) */}
+        {!isHeatmap && (
           <div className="viz-panel-ctrl">
-            <label className="chart-label">Y axis</label>
-            <select className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
-              {(numCols.length > 0 ? numCols : allCols).map((c) => (
-                <option key={c.name} value={c.name}>{c.name}</option>
+            <label className="chart-label">
+              {isHist
+                ? "Numeric Column"
+                : isKPI
+                ? "Metric Column"
+                : isForecast
+                ? "Date Column"
+                : isWaterfall
+                ? "Step Column"
+                : isMap
+                ? "Longitude / ID"
+                : "X Axis"}
+            </label>
+            <select
+              className="chart-select"
+              value={xCol}
+              onChange={(e) => setXCol(e.target.value)}
+            >
+              {allCols.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
               ))}
             </select>
           </div>
         )}
 
+        {/* Secondary / Y Column (Lists ALL columns - Phase 6) */}
+        {!isHeatmap && (needsY || isBox || isMap) && (
+          <div className="viz-panel-ctrl">
+            <label className="chart-label">
+              {isBox
+                ? "Group By (optional)"
+                : isForecast
+                ? "Numeric Metric (Y)"
+                : isWaterfall
+                ? "Value Delta (Y)"
+                : isMap
+                ? "Latitude Column"
+                : "Y Axis"}
+            </label>
+            <select
+              className="chart-select"
+              value={yCol}
+              onChange={(e) => setYCol(e.target.value)}
+            >
+              {isBox && <option value="">— None —</option>}
+              {allCols.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Stack by Column (Lists ALL columns - Phase 6) */}
         {needsStack && (
           <div className="viz-panel-ctrl">
             <label className="chart-label">Stack by</label>
-            <select className="chart-select" value={stackCol} onChange={(e) => setStackCol(e.target.value)}>
-              {(catCols.length > 0 ? catCols : allCols).map((c) => (
-                <option key={c.name} value={c.name}>{c.name}</option>
+            <select
+              className="chart-select"
+              value={stackCol}
+              onChange={(e) => setStackCol(e.target.value)}
+            >
+              {allCols.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
               ))}
             </select>
           </div>
         )}
 
-        {chartType === "box_plot" && catCols.length > 0 && (
-          <div className="viz-panel-ctrl">
-            <label className="chart-label">Group by</label>
-            <select className="chart-select" value={yCol} onChange={(e) => setYCol(e.target.value)}>
-              <option value="">— None —</option>
-              {catCols.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
-            </select>
-          </div>
-        )}
-
-        {!isHistOrBox && chartType !== "stacked_bar" && (
-          <div className="viz-panel-ctrl">
+        {/* Aggregation */}
+        {!isHist && !isBox && !isStack && !isForecast && !isHeatmap && !isWaterfall && !isMap && (
+          <div className="viz-panel-ctrl" style={{ maxWidth: 90 }}>
             <label className="chart-label">Agg</label>
-            <select className="chart-select" value={agg} onChange={(e) => setAgg(e.target.value)}
-              disabled={chartType === "scatter" || chartType === "pie"}>
+            <select
+              className="chart-select"
+              value={agg}
+              onChange={(e) => setAgg(e.target.value)}
+              disabled={chartType === "scatter" || chartType === "pie"}
+            >
               <option value="count">Count</option>
               <option value="sum">Sum</option>
               <option value="mean">Mean</option>
@@ -937,13 +1503,23 @@ const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, o
           </div>
         )}
 
-        <button className="viz-panel-gen-btn"
+        <button
+          className="viz-panel-gen-btn"
           onClick={() => doFetch()}
-          disabled={loading || !xCol || (needsY && !yCol) || (needsStack && !stackCol)}>
-          {loading ? "…" : "Go"}
+          disabled={loading || (!isHeatmap && !xCol) || (needsY && !yCol) || (needsStack && !stackCol)}
+          title="Generate chart"
+        >
+          {loading ? "…" : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>}
         </button>
 
-        <button className="viz-panel-remove-btn" onClick={onRemove} title="Remove chart">
+        <button
+          className="viz-panel-remove-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          title="Remove chart"
+        >
           ✕
         </button>
       </div>
@@ -957,10 +1533,15 @@ const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, o
             <span className="chart-loading-label">Generating…</span>
           </div>
         )}
-        {!loading && error && <div className="viz-panel-error">{error}</div>}
+        {!loading && error && (
+          <div className="viz-panel-error">
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Unable to render chart:</div>
+            <div>{error}</div>
+          </div>
+        )}
         {!loading && !chartData && !error && (
           <div className="chart-empty" style={{ minHeight: 120 }}>
-            Select columns and click <strong>Go</strong>
+            Select parameters and click <strong>Go</strong>
           </div>
         )}
         {!loading && chartData && renderSharedChart(chartData, chartType)}
@@ -968,7 +1549,9 @@ const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, o
 
       {chartData && !loading && (
         <div className="viz-panel-meta">
-          {chartData.group_count} groups&nbsp;·&nbsp;{chartData.row_count?.toLocaleString()} rows
+          {chartData.group_count !== undefined && `${chartData.group_count} groups · `}
+          {chartData.row_count?.toLocaleString()} rows
+          {chartData.metrics?.r2 !== undefined && ` · R² = ${chartData.metrics.r2}`}
         </div>
       )}
     </div>
@@ -976,84 +1559,155 @@ const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, o
 });
 
 // ---------------------------------------------------------------------------
-// VisualizeWorkspace — full-page workspace with column sidebar + chart grid
+// VisualizeWorkspace — full-page workspace with gallery palette, unlimited charts, and 2-per-page PDF export
 // ---------------------------------------------------------------------------
 function VisualizeWorkspace({ datasetId, columns, datasetFilename }) {
-  // panels: array of 4 slots, each either { active: true } or { active: false }
-  const [panels, setPanels] = useState([
-    { active: true, key: 0 },
-    { active: false, key: 1 },
-    { active: false, key: 2 },
-    { active: false, key: 3 },
-  ]);
-  const nextKeyRef = useRef(4);
-  const panelRefs = useRef([null, null, null, null]);
+  // Unlimited dynamic panels starting empty (Phase 1)
+  const [panels, setPanels] = useState([]);
+  const [focusedPanelId, setFocusedPanelId] = useState(null);
+  const nextKeyRef = useRef(1);
+  const panelRefs = useRef({});
+  const panelConfigs = useRef({});
+  const [sidebarTab, setSidebarTab] = useState("gallery");
   const [pdfExporting, setPdfExporting] = useState(false);
 
-  const activePanelCount = panels.filter((p) => p.active).length;
-
-  const activatePanel = (slotIdx) => {
-    setPanels((prev) => prev.map((p, i) =>
-      i === slotIdx ? { ...p, active: true, key: nextKeyRef.current++ } : p
-    ));
+  const addPanel = (type = "bar") => {
+    const newId = nextKeyRef.current++;
+    setPanels((prev) => [...prev, { id: newId, key: newId, type }]);
+    setFocusedPanelId(newId);
   };
 
-  const removePanel = (slotIdx) => {
-    setPanels((prev) => prev.map((p, i) =>
-      i === slotIdx ? { ...p, active: false, key: nextKeyRef.current++ } : p
-    ));
+  const removePanel = (id) => {
+    setPanels((prev) => prev.filter((p) => p.id !== id));
+    delete panelRefs.current[id];
+    delete panelConfigs.current[id];
+    if (focusedPanelId === id) setFocusedPanelId(null);
   };
 
+  const changePanelType = (id, newType) => {
+    setPanels((prev) => prev.map((p) => (p.id === id ? { ...p, type: newType } : p)));
+  };
+
+  const handleGalleryClick = (typeId) => {
+    if (focusedPanelId && panels.some((p) => p.id === focusedPanelId)) {
+      changePanelType(focusedPanelId, typeId);
+    } else {
+      addPanel(typeId);
+    }
+  };
+
+  const handleConfigChange = (id, cfg) => {
+    panelConfigs.current[id] = cfg;
+  };
+
+  // PDF Export: Strict 2 charts per page (Phase 7)
   const handleExportPdf = async () => {
+    if (panels.length === 0) return;
     setPdfExporting(true);
     try {
-      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = 210;
+      const pageH = 297;
       const margin = 12;
+      const usableW = pageW - margin * 2; // 186mm
 
-      // Header on first page
-      pdf.setFontSize(14);
-      pdf.setTextColor(40, 40, 40);
-      pdf.text(datasetFilename || "Dataset", margin, margin + 6);
-      pdf.setFontSize(10);
-      pdf.setTextColor(120, 120, 120);
-      pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, margin + 14);
+      const totalCharts = panels.length;
+      const totalPages = Math.ceil(totalCharts / 2);
 
-      let chartIdx = 0;
-      for (let i = 0; i < panels.length; i++) {
-        if (!panels[i].active) continue;
-        const node = panelRefs.current[i];
-        if (!node) continue;
+      for (let i = 0; i < totalCharts; i++) {
+        const panel = panels[i];
+        const pageIdx = Math.floor(i / 2);
+        const slotIdx = i % 2; // 0 = top half, 1 = bottom half
 
-        if (chartIdx > 0) pdf.addPage();
-
-        try {
-          const canvas = await html2canvas(node, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-            logging: false,
-          });
-          const imgData = canvas.toDataURL("image/png");
-          const imgW = pageW - margin * 2;
-          const imgH = (canvas.height / canvas.width) * imgW;
-          const yOffset = chartIdx === 0 ? margin + 20 : margin;
-          const finalH = Math.min(imgH, pageH - yOffset - margin);
-          pdf.addImage(imgData, "PNG", margin, yOffset, imgW, finalH);
-        } catch (err) {
-          console.warn(`Failed to capture chart panel ${i}:`, err);
+        // Add page for each 2 charts after the first
+        if (i > 0 && slotIdx === 0) {
+          pdf.addPage();
         }
-        chartIdx++;
+
+        // Header on first page only
+        if (pageIdx === 0 && slotIdx === 0) {
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(14);
+          pdf.setTextColor(28, 110, 140);
+          pdf.text(datasetFilename || "Dataset Analysis Report", margin, margin + 4);
+
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(9);
+          pdf.setTextColor(120, 120, 120);
+          pdf.text(
+            `Generated: ${new Date().toLocaleString()} · ${totalCharts} Charts · 2 per page`,
+            margin,
+            margin + 10
+          );
+        }
+
+        // Compute slot placement
+        let titleY, imgY, maxH;
+        if (pageIdx === 0) {
+          if (slotIdx === 0) {
+            titleY = margin + 17;
+            imgY = margin + 21;
+            maxH = 105;
+          } else {
+            titleY = margin + 137;
+            imgY = margin + 141;
+            maxH = 105;
+          }
+        } else {
+          if (slotIdx === 0) {
+            titleY = margin + 5;
+            imgY = margin + 9;
+            maxH = 118;
+          } else {
+            titleY = margin + 138;
+            imgY = margin + 142;
+            maxH = 118;
+          }
+        }
+
+        // Chart Title above chart (type + axes)
+        const cfg = panelConfigs.current[panel.id] || {};
+        const chartObj = CHART_GALLERY_TYPES.find((c) => c.id === (cfg.chartType || panel.type));
+        const chartName = chartObj ? chartObj.name : panel.type;
+        let axisDesc = cfg.xCol || "";
+        if (cfg.yCol) axisDesc += ` vs ${cfg.yCol}`;
+        if (cfg.chartType === "heatmap") axisDesc = "All Numeric Columns";
+        const chartTitle = `Chart ${i + 1}: ${chartName}${axisDesc ? ` — ${axisDesc}` : ""}`;
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10.5);
+        pdf.setTextColor(40, 40, 40);
+        pdf.text(chartTitle, margin, titleY);
+
+        // Capture chart node
+        const node = panelRefs.current[panel.id];
+        if (node) {
+          try {
+            const canvas = await html2canvas(node, {
+              scale: 2,
+              useCORS: true,
+              backgroundColor: "#ffffff",
+              logging: false,
+            });
+            const imgData = canvas.toDataURL("image/png");
+            const naturalH = (canvas.height / canvas.width) * usableW;
+            const finalH = Math.min(naturalH, maxH);
+            pdf.addImage(imgData, "PNG", margin, imgY, usableW, finalH);
+          } catch (err) {
+            console.warn(`Failed to capture chart ${i + 1}:`, err);
+          }
+        }
+
+        // Page footer (Page X of Y)
+        if (slotIdx === 1 || i === totalCharts - 1) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(150, 150, 150);
+          pdf.text(`Page ${pageIdx + 1} of ${totalPages}`, pageW - margin - 22, pageH - 8);
+        }
       }
 
-      if (chartIdx === 0) {
-        pdf.setFontSize(12);
-        pdf.setTextColor(150, 150, 150);
-        pdf.text("No active charts to export.", margin, margin + 30);
-      }
-
-      const stem = (datasetFilename || "charts").replace(/\.[^.]+$/, "");
+      const stem = (datasetFilename || "analysis").replace(/\.[^.]+$/, "");
       pdf.save(`${stem}_charts.pdf`);
     } catch (err) {
       console.error("PDF export failed:", err);
@@ -1062,54 +1716,130 @@ function VisualizeWorkspace({ datasetId, columns, datasetFilename }) {
     }
   };
 
+  const categories = ["Standard", "Composition", "Flow & Performance", "Forecasting", "Spatial"];
+
   return (
     <div className="viz-workspace">
-      {/* --- Column sidebar --- */}
+      {/* --- Sidebar: Gallery Palette & Columns --- */}
       <aside className="viz-sidebar">
-        <div className="viz-sidebar-title">Columns ({columns.length})</div>
-        <div className="viz-col-list">
-          {columns.map((col) => {
-            const info = getTypeInfo(col.inferred_type);
-            return (
-              <div key={col.name} className="viz-col-item" title={`${col.name} (${col.inferred_type || col.dtype})`}>
-                <span className={`viz-col-icon ${info.cls}`}>{info.icon}</span>
-                <span className="viz-col-name">{col.name}</span>
-                <span className="viz-col-type-label">{info.label}</span>
-              </div>
-            );
-          })}
+        <div className="viz-sidebar-tabs">
+          <button
+            className={`viz-tab-pill${sidebarTab === "gallery" ? " active" : ""}`}
+            onClick={() => setSidebarTab("gallery")}
+          >
+            🎨 Gallery
+          </button>
+          <button
+            className={`viz-tab-pill${sidebarTab === "columns" ? " active" : ""}`}
+            onClick={() => setSidebarTab("columns")}
+          >
+            📋 Columns ({columns.length})
+          </button>
         </div>
-        {/* PDF export button */}
-        <button
-          className="viz-pdf-export-btn"
-          onClick={handleExportPdf}
-          disabled={pdfExporting || activePanelCount === 0}
-          title="Download all active charts as a PDF"
-        >
-          {pdfExporting ? "Exporting…" : "📄 Download as PDF"}
-        </button>
+
+        {/* Gallery Tab */}
+        {sidebarTab === "gallery" && (
+          <div className="gallery-section">
+            {categories.map((cat) => (
+              <div key={cat}>
+                <div className="gallery-category-title">{cat}</div>
+                <div className="gallery-grid">
+                  {CHART_GALLERY_TYPES.filter((t) => t.cat === cat).map((type) => (
+                    <div
+                      key={type.id}
+                      className="gallery-tile"
+                      draggable="true"
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", type.id);
+                        e.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => handleGalleryClick(type.id)}
+                      title={`${type.name}: ${type.desc} (Click to assign or add)`}
+                    >
+                      <span className="gallery-tile-icon">{type.icon}</span>
+                      <div className="gallery-tile-info">
+                        <span className="gallery-tile-name">{type.name}</span>
+                        <span className="gallery-tile-desc">{type.desc}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Columns Tab */}
+        {sidebarTab === "columns" && (
+          <div>
+            <div className="viz-sidebar-title">Dataset Columns ({columns.length})</div>
+            <div className="viz-col-list">
+              {columns.map((col) => {
+                const info = getTypeInfo(col.inferred_type);
+                return (
+                  <div key={col.name} className="viz-col-item" title={`${col.name} (${col.inferred_type || col.dtype})`}>
+                    <span className={`viz-col-icon ${info.cls}`}>{info.icon}</span>
+                    <span className="viz-col-name">{col.name}</span>
+                    <span className="viz-col-type-label">{info.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* PDF Export Button */}
+        <div style={{ marginTop: "auto", paddingTop: 16 }}>
+          <button
+            className="viz-pdf-export-btn"
+            onClick={handleExportPdf}
+            disabled={pdfExporting || panels.length === 0}
+            title="Download all active charts in 2-per-page PDF layout"
+            style={{ width: "100%" }}
+          >
+            {pdfExporting ? "Exporting PDF…" : `📄 Download PDF (${panels.length})`}
+          </button>
+        </div>
       </aside>
 
-      {/* --- Chart grid --- */}
-      <div className={`viz-grid${activePanelCount <= 1 ? " cols-1" : ""}`}>
-        {panels.map((panel, idx) =>
-          panel.active ? (
-            <ChartPanel
-              key={panel.key}
-              ref={(el) => { panelRefs.current[idx] = el; }}
-              index={idx}
-              datasetId={datasetId}
-              columns={columns}
-              onRemove={() => removePanel(idx)}
-            />
-          ) : (
-            <div key={panel.key} className="viz-placeholder" onClick={() => activatePanel(idx)}>
-              <div className="viz-placeholder-icon">＋</div>
-              <div className="viz-placeholder-label">Add Chart</div>
-              <div className="viz-placeholder-hint">Panel {idx + 1} of 4</div>
-            </div>
-          )
-        )}
+      {/* --- Dynamic Chart Grid (Unlimited Panels - Phase 1) --- */}
+      <div className={`viz-grid${panels.length <= 1 ? " cols-1" : ""}`}>
+        {panels.map((panel, idx) => (
+          <ChartPanel
+            key={panel.key}
+            ref={(el) => { panelRefs.current[panel.id] = el; }}
+            id={panel.id}
+            index={idx}
+            datasetId={datasetId}
+            columns={columns}
+            chartType={panel.type}
+            onSelectType={(newType) => changePanelType(panel.id, newType)}
+            isFocused={focusedPanelId === panel.id}
+            onFocus={() => setFocusedPanelId(panel.id)}
+            onConfigChange={handleConfigChange}
+            onRemove={() => removePanel(panel.id)}
+          />
+        ))}
+
+        {/* Single "+ Add Chart" tile at the end of the grid */}
+        <div
+          className="viz-placeholder"
+          onClick={() => addPanel("bar")}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const droppedType = e.dataTransfer.getData("text/plain");
+            addPanel(droppedType || "bar");
+          }}
+          title="Click or drop a chart type here to add a new chart"
+        >
+          <div className="viz-placeholder-icon">＋</div>
+          <div className="viz-placeholder-label">Add Chart</div>
+          <div className="viz-placeholder-hint">Click or drag a chart type here</div>
+        </div>
       </div>
     </div>
   );
@@ -2558,7 +3288,27 @@ export default function App() {
 
   return (
     <div className={`page${activeTab === "visualize" ? " viz-active" : ""}`}>
-      <div className="masthead">
+      {/* --- Top Navbar --- */}
+      <nav className="app-navbar">
+        <div className="app-navbar-logo">
+          <span className="logo-icon">DA</span>
+          Data Analyst Copilot
+        </div>
+        {displayReport && (
+          <span className="active-file-pill">{displayReport.filename}</span>
+        )}
+        <div className="navbar-spacer" />
+        {displayReport && (
+          <>
+            <button className="navbar-btn" onClick={resetAll}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload New File
+            </button>
+          </>
+        )}
+      </nav>
+
+      <div className={`masthead${displayReport ? " has-report" : ""}`}>
         <p className="eyebrow">Data profiler & cleaner · step 1 & 2</p>
         <h1>What's actually in your data</h1>
         <p>
@@ -2582,7 +3332,7 @@ export default function App() {
               <span className="value">{displayReport.column_count}</span>
               <span className="label">columns</span>
             </div>
-            <div className="stat">
+            <div className={`stat${displayReport.duplicate_row_count > 0 ? " stat-duplicates" : ""}`}>
               <span className={`value${displayReport.duplicate_row_count > 0 ? " flagged" : ""}`}>
                 {displayReport.duplicate_row_count?.toLocaleString()}
               </span>
@@ -2610,6 +3360,12 @@ export default function App() {
           <div style={{ display: activeTab === "clean" ? "block" : "none" }}>
 
           <div className="ledger-header">Columns</div>
+          <div className="column-table-header">
+            <span>Column Name</span>
+            <span>Type</span>
+            <span>Missing / Unique</span>
+            <span>Sample Values</span>
+          </div>
           {displayReport.columns?.map((col, idx) => (
             <ColumnRow column={col} index={idx} key={col.name} />
           ))}

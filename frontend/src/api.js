@@ -140,7 +140,9 @@ export async function sendChatMessage(message, datasetId = null, chartContext = 
 }
 
 export async function getChartData(datasetId, { chartType, x, y, agg, useCleaned }) {
-  const params = new URLSearchParams({ chart_type: chartType, x, agg });
+  const params = new URLSearchParams({ chart_type: chartType });
+  if (x) params.append("x", x);
+  if (agg) params.append("agg", agg);
   if (y) params.append("y", y);
   if (useCleaned !== undefined) params.append("use_cleaned", String(useCleaned));
 

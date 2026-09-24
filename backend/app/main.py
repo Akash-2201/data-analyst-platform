@@ -602,8 +602,8 @@ def download_cleaned_dataset(
 @app.get("/datasets/{dataset_id}/chart-data")
 def get_chart_data(
     dataset_id: str,
-    chart_type: str = Query("bar", regex="^(bar|line|scatter|pie|histogram|box_plot|stacked_bar)$"),
-    x: str = Query(..., description="Column name for X axis / grouping"),
+    chart_type: str = Query("bar"),
+    x: str | None = Query(None, description="Column name for X axis / grouping"),
     y: str | None = Query(None, description="Column name for Y axis (optional for count-based charts)"),
     agg: str = Query("count", regex="^(count|sum|mean)$"),
     use_cleaned: bool = Query(True, description="Prefer cleaned dataset if available"),
@@ -643,12 +643,16 @@ def get_chart_data(
     if df is None:
         raise HTTPException(status_code=404, detail="Dataset not found in storage.")
 
-    # --- Validate columns ---
-    if x not in df.columns:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Column '{x}' not found. Available: {list(df.columns)}",
-        )
+    # If x is not supplied and dataset has columns, pick the first column
+    if (not x or x not in df.columns) and len(df.columns) > 0 and chart_type != "heatmap":
+        if not x:
+            x = list(df.columns)[0]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{x}' not found. Available: {list(df.columns)}",
+            )
+
     if y is not None and y not in df.columns:
         raise HTTPException(
             status_code=400,
@@ -659,8 +663,39 @@ def get_chart_data(
     MAX_GROUPS = 50
 
     # -----------------------------------------------------------------------
-    # New chart types — early return before the existing bar/line/scatter/pie
-    # aggregation block below.
+    # Correlation Heatmap
+    # -----------------------------------------------------------------------
+    if chart_type == "heatmap":
+        num_cols = []
+        for c in df.columns:
+            s = pd.to_numeric(df[c], errors="coerce")
+            if s.dropna().count() >= 2:
+                num_cols.append(c)
+
+        if len(num_cols) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Correlation Heatmap requires at least 2 numeric columns in the dataset.",
+            )
+
+        num_cols = num_cols[:12]
+        sub_df = df[num_cols].apply(pd.to_numeric, errors="coerce")
+        corr_df = sub_df.corr().round(3).fillna(0.0)
+
+        matrix = corr_df.values.tolist()
+        cols = list(corr_df.columns)
+        return {
+            "chart_type": "heatmap",
+            "cols": cols,
+            "matrix": matrix,
+            "x_label": "Correlation Matrix",
+            "y_label": "",
+            "row_count": len(df),
+            "group_count": len(cols),
+        }
+
+    # -----------------------------------------------------------------------
+    # Histogram
     # -----------------------------------------------------------------------
     if chart_type == "histogram":
         col_data = pd.to_numeric(df[x], errors="coerce").dropna()
@@ -676,6 +711,9 @@ def get_chart_data(
             "row_count": len(df), "group_count": len(labels),
         }
 
+    # -----------------------------------------------------------------------
+    # Box Plot
+    # -----------------------------------------------------------------------
     if chart_type == "box_plot":
         col_data = pd.to_numeric(df[x], errors="coerce").dropna()
         if col_data.empty:
@@ -703,32 +741,344 @@ def get_chart_data(
             "row_count": len(df), "group_count": len(labels_bp),
         }
 
-    if chart_type == "stacked_bar":
+    # -----------------------------------------------------------------------
+    # Stacked Bar & 100% Stacked Bar
+    # -----------------------------------------------------------------------
+    if chart_type in ("stacked_bar", "stacked_bar_100"):
         if not y or y not in df.columns:
-            raise HTTPException(status_code=400, detail="stacked_bar requires a 'y' column for the stack dimension.")
+            raise HTTPException(status_code=400, detail=f"{chart_type} requires a 'y' column for the stack dimension.")
         try:
             x_str = df[x].astype(str)
             y_str = df[y].astype(str)
             grouped_df = pd.DataFrame({"_x": x_str, "_y": y_str}).groupby(["_x", "_y"]).size().reset_index(name="count")
-            x_vals = grouped_df["_x"].unique()[:MAX_GROUPS]
-            y_vals = grouped_df["_y"].unique()[:MAX_GROUPS]
+            x_vals = list(grouped_df["_x"].unique()[:MAX_GROUPS])
+            y_vals = list(grouped_df["_y"].unique()[:MAX_GROUPS])
+
+            totals_per_x = {}
+            for xv in x_vals:
+                totals_per_x[str(xv)] = int(grouped_df[grouped_df["_x"] == xv]["count"].sum())
+
             series: list[dict] = []
+            raw_series: list[dict] = []
             for y_val in y_vals:
                 sub = grouped_df[grouped_df["_y"] == y_val].set_index("_x")["count"]
-                data_points = [int(sub.get(str(xv), 0)) for xv in x_vals]
+                data_points = []
+                raw_points = []
+                for xv in x_vals:
+                    raw_c = int(sub.get(str(xv), 0))
+                    raw_points.append(raw_c)
+                    if chart_type == "stacked_bar_100":
+                        tot = totals_per_x.get(str(xv), 0)
+                        pct = round((raw_c / tot * 100.0), 1) if tot > 0 else 0.0
+                        data_points.append(pct)
+                    else:
+                        data_points.append(raw_c)
                 series.append({"name": str(y_val), "data": data_points})
+                raw_series.append({"name": str(y_val), "data": raw_points})
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"Stacked bar failed: {exc}") from exc
         return {
-            "labels": [str(v) for v in x_vals], "series": series, "values": [],
-            "chart_type": chart_type, "x_label": x, "y_label": y,
+            "labels": [str(v) for v in x_vals], "series": series, "raw_series": raw_series, "values": [],
+            "chart_type": chart_type, "x_label": x, "y_label": ("% Share" if chart_type == "stacked_bar_100" else y),
             "row_count": len(df), "group_count": len(x_vals),
         }
 
-    # --- Existing aggregation for bar / line / scatter / pie ---
+    # -----------------------------------------------------------------------
+    # Waterfall Chart
+    # -----------------------------------------------------------------------
+    if chart_type == "waterfall":
+        if y and y in df.columns:
+            num_col = y
+            cat_col = x
+        else:
+            num_col = x
+            cat_col = None
+
+        delta_series = pd.to_numeric(df[num_col], errors="coerce")
+        if delta_series.dropna().empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{num_col}' has no numeric values for Waterfall calculation.",
+            )
+
+        if cat_col:
+            sub = df[[cat_col, num_col]].copy()
+            sub["_num"] = delta_series
+            wf_grouped = sub.dropna(subset=["_num"]).groupby(cat_col)["_num"].sum().head(20)
+            step_labels = [str(k) for k in wf_grouped.index]
+            step_deltas = [round(float(v), 2) for v in wf_grouped.values]
+        else:
+            valid_items = delta_series.dropna().head(20)
+            step_labels = [f"Item {i+1}" for i in range(len(valid_items))]
+            step_deltas = [round(float(v), 2) for v in valid_items.values]
+
+        cumulative = 0.0
+        items = []
+        for lbl, delta in zip(step_labels, step_deltas):
+            start = cumulative
+            end = cumulative + delta
+            cumulative = end
+            items.append({
+                "label": lbl,
+                "delta": delta,
+                "start": round(start, 2),
+                "end": round(end, 2),
+                "base": round(min(start, end), 2),
+                "span": round(abs(delta), 2),
+                "is_positive": delta >= 0,
+                "is_total": False,
+            })
+
+        items.append({
+            "label": "Total",
+            "delta": round(cumulative, 2),
+            "start": 0.0,
+            "end": round(cumulative, 2),
+            "base": 0.0 if cumulative >= 0 else round(cumulative, 2),
+            "span": round(abs(cumulative), 2),
+            "is_positive": cumulative >= 0,
+            "is_total": True,
+        })
+
+        return {
+            "chart_type": "waterfall",
+            "items": items,
+            "labels": [it["label"] for it in items],
+            "values": [it["delta"] for it in items],
+            "x_label": cat_col or "Item",
+            "y_label": f"Net {num_col}",
+            "row_count": len(df),
+            "group_count": len(items),
+        }
+
+    # -----------------------------------------------------------------------
+    # KPI / Card
+    # -----------------------------------------------------------------------
+    if chart_type == "kpi":
+        target_col = y if (y and y in df.columns) else x
+        num_s = pd.to_numeric(df[target_col], errors="coerce")
+        is_numeric = num_s.dropna().count() > 0
+        total_rows = len(df)
+        non_null_count = int(df[target_col].notna().sum())
+        unique_count = int(df[target_col].nunique())
+
+        if is_numeric:
+            s = num_s.dropna()
+            metric_agg = agg if agg in ("sum", "mean") else "mean"
+            stats = {
+                "sum": round(float(s.sum()), 2),
+                "mean": round(float(s.mean()), 2),
+                "min": round(float(s.min()), 2),
+                "max": round(float(s.max()), 2),
+                "median": round(float(s.median()), 2),
+                "count": non_null_count,
+                "unique": unique_count,
+            }
+            display_val = stats[metric_agg]
+        else:
+            metric_agg = "count"
+            display_val = non_null_count
+            stats = {
+                "count": non_null_count,
+                "unique": unique_count,
+                "total_rows": total_rows,
+            }
+
+        return {
+            "chart_type": "kpi",
+            "column": target_col,
+            "is_numeric": is_numeric,
+            "metric": metric_agg,
+            "value": display_val,
+            "stats": stats,
+            "x_label": target_col,
+            "y_label": metric_agg.upper(),
+            "row_count": total_rows,
+            "group_count": 1,
+        }
+
+    # -----------------------------------------------------------------------
+    # Forecasting Chart Types
+    # -----------------------------------------------------------------------
+    if chart_type in ("forecast_line", "forecast_ci", "forecast_actual", "forecast_residual"):
+        x_dates = pd.to_datetime(df[x], errors="coerce")
+        y_nums = pd.to_numeric(df[y], errors="coerce") if (y and y in df.columns) else None
+
+        # If x is numeric and y is date, gracefully invert
+        if (x_dates.dropna().count() < 3) and (y and y in df.columns):
+            y_dates = pd.to_datetime(df[y], errors="coerce")
+            x_nums = pd.to_numeric(df[x], errors="coerce")
+            if y_dates.dropna().count() >= 3 and x_nums.dropna().count() >= 3:
+                x, y = y, x
+                x_dates, y_nums = y_dates, x_nums
+
+        if x_dates.dropna().count() < 3:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Forecasting requires a Date/Time column for X. Column '{x}' has fewer than 3 valid dates.",
+            )
+        if y is None or y not in df.columns or y_nums is None or y_nums.dropna().count() < 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Forecasting requires a Numeric column for Y. Please select a numeric Y column.",
+            )
+
+        valid_mask = x_dates.notna() & y_nums.notna()
+        ts_df = pd.DataFrame({"date": x_dates[valid_mask], "val": y_nums[valid_mask]}).sort_values("date")
+        ts_df = ts_df.groupby("date", as_index=False)["val"].mean()
+
+        if len(ts_df) < 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Not enough distinct historical date points (minimum 3 required) for trend projection.",
+            )
+
+        if len(ts_df) > 60:
+            ts_df = ts_df.tail(60).reset_index(drop=True)
+
+        n_hist = len(ts_df)
+        t = np.arange(n_hist)
+        vals = ts_df["val"].values.astype(float)
+
+        poly = np.polyfit(t, vals, 1)
+        slope, intercept = float(poly[0]), float(poly[1])
+        fitted_hist = slope * t + intercept
+        residuals = vals - fitted_hist
+
+        dof = max(1, n_hist - 2)
+        se = float(np.sqrt(np.sum(residuals**2) / dof))
+
+        ss_tot = float(np.sum((vals - np.mean(vals))**2))
+        ss_res = float(np.sum(residuals**2))
+        r2 = round(float(1.0 - (ss_res / ss_tot)), 3) if ss_tot > 0 else 0.0
+
+        n_proj = min(12, max(5, int(n_hist * 0.25)))
+        time_diffs = ts_df["date"].diff().dropna()
+        median_delta = time_diffs.median() if not time_diffs.empty else pd.Timedelta(days=1)
+        if median_delta <= pd.Timedelta(0):
+            median_delta = pd.Timedelta(days=1)
+
+        last_date = ts_df["date"].iloc[-1]
+        future_dates = [last_date + median_delta * (i + 1) for i in range(n_proj)]
+        t_future = np.arange(n_hist, n_hist + n_proj)
+        forecast_vals = slope * t_future + intercept
+
+        t_mean = np.mean(t)
+        t_ss = np.sum((t - t_mean)**2) if np.sum((t - t_mean)**2) > 0 else 1.0
+        se_pred = se * np.sqrt(1.0 + (1.0 / n_hist) + ((t_future - t_mean)**2 / t_ss))
+        ci_margin = 1.96 * se_pred
+
+        history_points = []
+        for i in range(n_hist):
+            d_str = ts_df["date"].iloc[i].strftime("%Y-%m-%d")
+            history_points.append({
+                "date": d_str,
+                "actual": round(float(vals[i]), 2),
+                "fitted": round(float(fitted_hist[i]), 2),
+                "residual": round(float(residuals[i]), 2),
+            })
+
+        future_points = []
+        for i in range(n_proj):
+            d_str = future_dates[i].strftime("%Y-%m-%d")
+            fc = round(float(forecast_vals[i]), 2)
+            margin = round(float(ci_margin[i]), 2)
+            future_points.append({
+                "date": d_str,
+                "forecast": fc,
+                "ci_lower": round(fc - margin, 2),
+                "ci_upper": round(fc + margin, 2),
+            })
+
+        return {
+            "chart_type": chart_type,
+            "history": history_points,
+            "future": future_points,
+            "metrics": {
+                "r2": r2,
+                "slope": round(slope, 4),
+                "intercept": round(intercept, 2),
+                "se": round(se, 2),
+                "n_hist": n_hist,
+                "n_proj": n_proj,
+            },
+            "x_label": x,
+            "y_label": y,
+            "row_count": len(df),
+            "group_count": n_hist + n_proj,
+        }
+
+    # -----------------------------------------------------------------------
+    # Map
+    # -----------------------------------------------------------------------
+    if chart_type == "map":
+        lat_col = None
+        lon_col = None
+        for c in df.columns:
+            clow = c.lower()
+            if clow in ("lat", "latitude", "y_coord", "lat_deg"):
+                lat_col = c
+            elif clow in ("lon", "lng", "long", "longitude", "x_coord", "lon_deg"):
+                lon_col = c
+
+        if x and y and y in df.columns:
+            lat_col = y
+            lon_col = x
+
+        if not lat_col or not lon_col:
+            return {
+                "chart_type": "map",
+                "deferred": True,
+                "message": "Geographic Map requires explicit Latitude and Longitude columns. No coordinate columns were detected.",
+                "x_label": "Longitude",
+                "y_label": "Latitude",
+                "points": [],
+                "row_count": len(df),
+                "group_count": 0,
+            }
+
+        lat_s = pd.to_numeric(df[lat_col], errors="coerce")
+        lon_s = pd.to_numeric(df[lon_col], errors="coerce")
+        valid_coords = lat_s.notna() & lon_s.notna()
+
+        if valid_coords.sum() == 0:
+            return {
+                "chart_type": "map",
+                "deferred": True,
+                "message": f"Columns '{lat_col}' and '{lon_col}' contain no valid numeric latitude/longitude values.",
+                "x_label": lon_col,
+                "y_label": lat_col,
+                "points": [],
+                "row_count": len(df),
+                "group_count": 0,
+            }
+
+        sub = df[valid_coords].head(200)
+        points = []
+        for _, row in sub.iterrows():
+            points.append({
+                "lat": round(float(row[lat_col]), 5),
+                "lon": round(float(row[lon_col]), 5),
+                "label": str(row.get(x, f"{row[lat_col]}, {row[lon_col]}")),
+            })
+
+        return {
+            "chart_type": "map",
+            "deferred": False,
+            "points": points,
+            "lat_col": lat_col,
+            "lon_col": lon_col,
+            "x_label": lon_col,
+            "y_label": lat_col,
+            "row_count": len(df),
+            "group_count": len(points),
+        }
+
+    # -----------------------------------------------------------------------
+    # Standard aggregation for bar / line / scatter / pie / area / funnel / treemap
+    # -----------------------------------------------------------------------
     try:
         if agg == "count" or y is None:
-            # Count occurrences of each x value
             grouped = (
                 df[x]
                 .astype(str)
@@ -758,6 +1108,9 @@ def get_chart_data(
             y_label = f"Mean of {y}"
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Aggregation failed: {exc}") from exc
+
+    if chart_type == "funnel":
+        grouped = grouped.sort_values("value", ascending=False)
 
     # Convert to JSON-safe types
     labels = [str(v) for v in grouped["label"].tolist()]
