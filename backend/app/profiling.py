@@ -14,6 +14,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from app.validation_rules import (
+    detect_semantic_type as _detect_semantic_type_vr,
+    classify_missing_percentage,
+)
+
 import pandas as pd
 
 
@@ -32,8 +37,14 @@ def _safe(value: Any) -> Any:
 
 
 def _infer_semantic_type(series: pd.Series, dtype_str: str) -> str:
-    """A light heuristic on top of the pandas dtype, useful before the user
-    tells us what a column actually means."""
+    """Infer semantic type using the centralised 47-type detector, with
+    a lightweight fallback for edge cases it doesn't cover."""
+    # Primary: use the full detector from validation_rules.py
+    detected = _detect_semantic_type_vr(series, str(series.name or ""))
+    if detected != "text":
+        return detected
+
+    # Fallback: original heuristic for numeric / identifier / non_negative_numeric
     name = str(series.name).lower() if series.name is not None else ""
     non_neg_keys = ("age", "salary", "experience", "income", "years", "price", "amount", "cost")
 
@@ -53,7 +64,7 @@ def _infer_semantic_type(series: pd.Series, dtype_str: str) -> str:
     if non_null.empty:
         return "text"
 
-    # Check if object column is mostly numeric (e.g. numeric column containing 'N/A' text)
+    # Check if object column is mostly numeric
     coerced = pd.to_numeric(non_null, errors="coerce")
     valid_num_cnt = int(coerced.notna().sum())
     if len(non_null) > 0 and (valid_num_cnt / len(non_null)) >= 0.5 and valid_num_cnt >= 1:
@@ -106,13 +117,15 @@ def profile_column(series: pd.Series) -> dict[str, Any]:
     missing = int(series.isna().sum())
     dtype_str = str(series.dtype)
     non_null = series.dropna()
+    missing_pct = _safe(round(100 * missing / total, 2)) if total else 0
 
     column_report: dict[str, Any] = {
         "name": series.name,
         "dtype": dtype_str,
         "inferred_type": _infer_semantic_type(series, dtype_str),
         "missing_count": missing,
-        "missing_pct": _safe(round(100 * missing / total, 2)) if total else 0,
+        "missing_pct": missing_pct,
+        "missing_classification": classify_missing_percentage(missing_pct if isinstance(missing_pct, (int, float)) else 0),
         "unique_count": int(non_null.nunique()),
         "unique_pct": _safe(round(100 * non_null.nunique() / total, 2)) if total else 0,
         "sample_values": [_safe(v) for v in non_null.astype(str).unique()[:5]],

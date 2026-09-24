@@ -29,7 +29,73 @@ OPPOSITES: set[tuple[str, str]] = {
     ("m", "f"), ("f", "m"),
 }
 
-EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+# ---------------------------------------------------------------------------
+# COLUMN_TYPE_RULES — delegates to centralised validation_rules.py
+# ---------------------------------------------------------------------------
+# The canonical validation logic lives in validation_rules.py.
+# This adapter converts ValidationIssue objects to the legacy dict format
+# that the existing UI / pipeline expects (row_index, raw_value,
+# suggested_value, reason).
+
+from app.validation_rules import (
+    COLUMN_VALIDATION_RULES,
+    validate_column,
+    detect_semantic_type,
+    validate_email as _vr_validate_email,
+    validate_phone as _vr_validate_phone,
+    validate_name as _vr_validate_name,
+    validate_age as _vr_validate_age,
+    validate_gender as _vr_validate_gender,
+    validate_boolean as _vr_validate_boolean,
+    validate_currency as _vr_validate_currency,
+    validate_percentage as _vr_validate_percentage,
+    validate_zipcode as _vr_validate_zipcode,
+    validate_id as _vr_validate_id,
+    detect_outliers_iqr,
+    detect_dataset_level_issues,
+    run_all_cross_column_validations,
+)
+
+
+def _adapt_validation_issues(issues_list) -> list[dict]:
+    """Convert ValidationIssue objects to legacy flagged_values dict format."""
+    return [
+        {
+            "row_index": i.row_index,
+            "raw_value": i.raw_value,
+            "suggested_value": i.suggested_value,
+            "reason": i.issue,
+            "confidence": i.confidence,
+            "severity": i.severity,
+        }
+        for i in issues_list
+    ]
+
+
+def _make_type_adapter(validator_fn):
+    """Create a COLUMN_TYPE_RULES-compatible adapter for a validation_rules validator."""
+    def adapter(series: pd.Series, column_name: str) -> list[dict]:
+        issues = validator_fn(series, column_name)
+        return _adapt_validation_issues(issues)
+    return adapter
+
+
+# Registry: maps inferred_type / semantic_type → validation function.
+# Each function signature: (series: pd.Series, column_name: str) -> list[dict]
+# Delegates to the canonical validators in validation_rules.py.
+COLUMN_TYPE_RULES: dict[str, callable] = {
+    "phone": _make_type_adapter(_vr_validate_phone),
+    "email": _make_type_adapter(_vr_validate_email),
+    "name": _make_type_adapter(_vr_validate_name),
+    "age": _make_type_adapter(_vr_validate_age),
+    "gender": _make_type_adapter(_vr_validate_gender),
+    "boolean": _make_type_adapter(_vr_validate_boolean),
+    "currency": _make_type_adapter(_vr_validate_currency),
+    "percentage": _make_type_adapter(_vr_validate_percentage),
+    "zipcode": _make_type_adapter(_vr_validate_zipcode),
+    "id": _make_type_adapter(_vr_validate_id),
+}
+
 
 
 def clean_numeric_value(val: Any) -> Any:
@@ -174,77 +240,36 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "severity": "medium",
                 })
 
-        # Phase 1: Dedicated Phone format validation (never type-converted or numerically coerced)
+        # Centralised per-type validation via COLUMN_TYPE_RULES registry.
+        # Uses the full 47-type semantic detection from validation_rules.py.
+        # Determines effective type for this column and runs the registered
+        # validator if one exists.
+        effective_type = detect_semantic_type(col_series, col_name)
+        # Backward compat overrides:
         if is_phone_col:
-            invalid_phones: list[dict[str, Any]] = []
-            for idx, val in col_series.dropna().items():
-                s = str(val).strip()
-                if s.endswith(".0"):
-                    s = s[:-2]
-                digits = re.sub(r"\D", "", s)
-                has_letters = bool(re.search(r"[a-zA-Z]", s))
-                if has_letters or len(digits) < 10 or len(digits) > 15:
-                    reason = f"Invalid digit count ({len(digits)} digits, expected 10-15)" if not has_letters else "Contains alphabetic characters"
-                    invalid_phones.append({
-                        "row_index": int(idx),
-                        "raw_value": str(val),
-                        "suggested_value": str(digits if len(digits) >= 10 else s),
-                        "reason": reason,
-                    })
-            if invalid_phones:
+            effective_type = "phone"
+        elif is_email_col:
+            effective_type = "email"
+
+        rule_fn = COLUMN_TYPE_RULES.get(effective_type)
+        if rule_fn is not None:
+            flagged_items = rule_fn(col_series, col_name)
+            if flagged_items:
+                action_name = f"flag_invalid_{effective_type}"
                 suggestions.append({
                     "id": str(uuid.uuid4()),
-                    "action": "flag_invalid_phone",
-                    "params": {"column": col_name, "flagged_count": len(invalid_phones)},
-                    "description": f"Flag {len(invalid_phones)} phone number{'s' if len(invalid_phones) > 1 else ''} with invalid format in '{col_name}'",
+                    "action": action_name,
+                    "params": {"column": col_name, "flagged_count": len(flagged_items)},
+                    "description": (
+                        f"Flag {len(flagged_items)} {effective_type} value"
+                        f"{'s' if len(flagged_items) > 1 else ''}"
+                        f" with invalid format in '{col_name}'"
+                    ),
                     "severity": "medium",
                     "recommended": True,
-                    "flagged_values": invalid_phones,
+                    "flagged_values": flagged_items,
                 })
 
-        # Phase 2: Dedicated Email structural check
-        if is_email_col:
-            for idx, val in col_series.dropna().items():
-                s = str(val).strip()
-                reason = None
-                suggested = s
-                if "@" not in s:
-                    reason = "missing @"
-                    if ".gmail.com" in s or ".yahoo.com" in s or ".com" in s:
-                        suggested = re.sub(r"\.(?=[^.]+\.[^.]+$)", "@", s, count=1)
-                    else:
-                        suggested = s + "@gmail.com"
-                elif s.count("@") > 1:
-                    reason = "double @"
-                    suggested = re.sub(r"@+", "@", s)
-                elif "." not in s.split("@")[-1] or s.split("@")[-1].endswith(".") or s.split("@")[-1].startswith("."):
-                    reason = "missing domain extension (no . after @)"
-                    suggested = s + ".com"
-                elif bool(re.search(r"\s", s)):
-                    reason = "whitespace inside address"
-                    suggested = re.sub(r"\s+", "", s)
-
-                if reason:
-                    suggestions.append({
-                        "id": str(uuid.uuid4()),
-                        "action": "flag_invalid_email",
-                        "params": {
-                            "column": col_name,
-                            "row_index": int(idx),
-                            "raw_value": str(val),
-                            "suggested_value": str(suggested),
-                            "reason": reason,
-                        },
-                        "description": f"Invalid email '{val}': {reason}",
-                        "severity": "medium",
-                        "recommended": True,
-                        "flagged_values": [{
-                            "row_index": int(idx),
-                            "raw_value": str(val),
-                            "suggested_value": str(suggested),
-                            "reason": reason,
-                        }],
-                    })
 
         # Phase 3a & 4: Non-numeric text values or formatted numbers in numeric-typed columns (excluding phone)
         if not is_phone_col and not is_email_col and (

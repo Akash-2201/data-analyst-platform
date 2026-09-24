@@ -29,6 +29,7 @@ import difflib
 import pandas as pd
 
 from app.cleaning import suggest_cleaning_steps, find_near_duplicate_categories
+from app.gemini_config import GEMINI_MODELS_TO_TRY
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,50 @@ ALLOWED_OPERATIONS: set[str] = {
     "manual_value_override",
     "flag_invalid_email",
     "flag_invalid_phone",
+    "flag_invalid_name",
+    "flag_invalid_age",
+    "flag_invalid_gender",
+    "flag_invalid_boolean",
+    "flag_invalid_currency",
+    "flag_invalid_percentage",
+    "flag_invalid_zipcode",
+    "flag_invalid_id",
+    "flag_invalid_dob",
+    "flag_invalid_date",
+    "flag_invalid_time",
+    "flag_invalid_datetime",
+    "flag_invalid_salary",
+    "flag_invalid_cgpa",
+    "flag_invalid_gpa",
+    "flag_invalid_marks",
+    "flag_invalid_rating",
+    "flag_invalid_url",
+    "flag_invalid_ip_address",
+    "flag_invalid_uuid",
+    "flag_invalid_product_code",
+    "flag_invalid_address",
+    "flag_invalid_country",
+    "flag_invalid_state",
+    "flag_invalid_city",
+    "flag_invalid_handle",
+    "flag_invalid_payment_id",
+    "flag_invalid_transaction_id",
+    "flag_invalid_quantity",
+    "flag_invalid_weight",
+    "flag_invalid_height_measure",
+    "flag_invalid_temperature",
+    "flag_invalid_distance",
+    "flag_invalid_boolean_flag",
+    "flag_invalid_status",
+    "flag_invalid_education",
+    "flag_invalid_department",
+    "flag_invalid_experience",
+    "flag_invalid_time_duration",
+    "flag_invalid_filepath",
+    "flag_invalid_category",
+    "flag_invalid_age_group",
+    "flag_invalid_integer",
+    "flag_invalid_decimal",
 }
 
 ALLOWED_SEVERITIES: set[str] = {"high", "medium", "low"}
@@ -621,7 +666,7 @@ def _validate_and_enrich(
     date_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if models_to_try is None:
-        models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+        models_to_try = GEMINI_MODELS_TO_TRY
     operation = raw.get("operation", "")
     column = raw.get("column", "")
 
@@ -838,9 +883,10 @@ def _build_guaranteed_column_response(
             # Disallow standardize_category on date columns
             if action == "standardize_category" and entry["card_type"] == "date":
                 continue
-            # Deduplicate by action name within the same column (except flag_invalid_email)
+            # Deduplicate by action name within the same column (except flag_invalid_* actions
+            # which may each surface distinct typed-validation results)
             existing_actions = {iss.get("action") for iss in entry["issues"]}
-            if action == "flag_invalid_email" or action not in existing_actions:
+            if action.startswith("flag_invalid_") or action not in existing_actions:
                 entry["issues"].append(sug)
                 entry["status"] = "has_issues"
                 if entry["card_type"] == "clean":
@@ -946,7 +992,7 @@ def generate_ai_suggestions(
         from google.genai import types as genai_types
 
         client = genai.Client(api_key=api_key)
-        models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+        models_to_try = GEMINI_MODELS_TO_TRY
 
         # ------------------------------------------------------------------
         # Phase 0: Deterministic per-column categorical & date grouping.

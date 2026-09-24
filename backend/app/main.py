@@ -9,6 +9,7 @@ download cleaned CSV/Excel results, and handle chat/settings endpoints.
 from __future__ import annotations
 
 import io
+import logging
 import os
 from pathlib import Path
 import uuid
@@ -24,11 +25,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.ai_suggestions import generate_ai_suggestions, ALLOWED_OPERATIONS
+from app.gemini_config import GEMINI_MODELS_TO_TRY
 from app.cleaning import apply_pipeline
 from app.database import Base, engine, get_db
 from app.models import Dataset, PipelineStep
 from app.profiling import profile_dataframe
 from app.storage import get_storage
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -158,6 +162,62 @@ def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> dict[str,
 
     result = generate_ai_suggestions(df, profile)
     return result
+
+
+@app.get("/datasets/{dataset_id}/validation")
+def get_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Run the centralised 47-type validation rules engine on every column."""
+    from app.validation_rules import validate_column, detect_semantic_type, detect_dataset_level_issues
+
+    df = DATASETS.get(dataset_id)
+    if df is None:
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+        storage = get_storage()
+        raw_bytes = storage.load(dataset.raw_storage_path)
+        df = _parse_dataframe(dataset.filename, raw_bytes)
+        DATASETS[dataset_id] = df
+
+    column_results = []
+    for col in df.columns:
+        sem_type = detect_semantic_type(df[col], col)
+        result = validate_column(df[col], col, semantic_type=sem_type)
+        column_results.append({
+            "column": result.column_name,
+            "semantic_type": result.semantic_type,
+            "issue_count": len(result.issues),
+            "issues": result.to_flagged_values(),
+        })
+
+    dataset_issues = [i.to_dict() for i in detect_dataset_level_issues(df)]
+
+    return {
+        "column_results": column_results,
+        "dataset_issues": dataset_issues,
+    }
+
+
+@app.get("/datasets/{dataset_id}/cross-column-validation")
+def get_cross_column_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Run cross-column validation rules (DOB↔Age, Start↔End, Qty×Price, etc.)."""
+    from app.validation_rules import run_all_cross_column_validations
+
+    df = DATASETS.get(dataset_id)
+    if df is None:
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+        storage = get_storage()
+        raw_bytes = storage.load(dataset.raw_storage_path)
+        df = _parse_dataframe(dataset.filename, raw_bytes)
+        DATASETS[dataset_id] = df
+
+    issues = run_all_cross_column_validations(df)
+    return {
+        "cross_column_issues": [i.to_dict() for i in issues],
+        "total_issues": len(issues),
+    }
 
 
 @app.post("/datasets/{dataset_id}/pipeline")
@@ -423,25 +483,73 @@ def download_cleaned_dataset(
     if fmt == "xlsx":
         from openpyxl.utils import get_column_letter
 
-        # Parse CSV bytes to DataFrame then convert to Excel
-        cleaned_df = pd.read_csv(io.BytesIO(csv_bytes))
+        # Parse CSV bytes to DataFrame — use dtype=str so pd.read_csv never
+        # silently coerces all-digit phone numbers (or other text columns) to
+        # int64/float64.  We'll convert genuinely numeric columns back below.
+        cleaned_df = pd.read_csv(io.BytesIO(csv_bytes), dtype=str, keep_default_na=False)
+
+        # Restore numeric dtypes for columns that are genuinely numeric,
+        # while leaving phone/email/text columns as str.
+        _PHONE_KEYWORDS = ("phone", "mobile", "contact")
+        _EMAIL_KEYWORDS = ("email", "e-mail", "e_mail")
+        text_format_col_indices: list[int] = []  # 1-based indices for openpyxl
+
+        for col_idx_0, col_name in enumerate(cleaned_df.columns):
+            col_lower = str(col_name).lower()
+            is_phone = any(kw in col_lower for kw in _PHONE_KEYWORDS)
+            is_email = any(kw in col_lower for kw in _EMAIL_KEYWORDS)
+
+            if is_phone or is_email:
+                # Keep as string; replace literal "nan" with empty string
+                cleaned_df[col_name] = cleaned_df[col_name].replace("nan", "").replace("", "")
+                text_format_col_indices.append(col_idx_0 + 1)  # openpyxl is 1-based
+                logger.info(
+                    "Column '%s' (idx %d) forced to text dtype for Excel export",
+                    col_name, col_idx_0,
+                )
+            else:
+                # Try to restore numeric dtype for genuinely numeric columns
+                coerced = pd.to_numeric(cleaned_df[col_name], errors="coerce")
+                # If ≥50% of non-empty values are valid numbers, treat as numeric
+                non_empty = cleaned_df[col_name][cleaned_df[col_name] != ""]
+                if len(non_empty) > 0 and coerced.notna().sum() >= len(non_empty) * 0.5:
+                    cleaned_df[col_name] = coerced
+
         output = io.BytesIO()
         sheet_name = "Cleaned Data"
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             cleaned_df.to_excel(writer, index=False, sheet_name=sheet_name)
             ws = writer.sheets[sheet_name]
 
-            # Confirm worksheet has no protection and is completely normal/editable
-            ws.protection.disable()
-            ws.protection.sheet = False
             try:
                 ws.views.sheetView[0].showGridLines = True
             except Exception:  # noqa: BLE001
                 pass
 
+            # Force text format (@) on phone/email columns so Excel never
+            # renders all-digit strings as numbers / scientific notation.
+            try:
+                for col_idx_1 in text_format_col_indices:
+                    col_letter = get_column_letter(col_idx_1)
+                    for row in range(1, ws.max_row + 1):
+                        cell = ws[f"{col_letter}{row}"]
+                        cell.number_format = "@"
+                        # Re-set the value as string to clear any cached numeric type
+                        if row > 1 and cell.value is not None:
+                            cell.value = str(cell.value)
+                logger.info(
+                    "Text format (@) applied to %d column(s): indices %s",
+                    len(text_format_col_indices), text_format_col_indices,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Text column formatting failed: %s", exc)
+
             # Auto-size each column's width based on content (sample first 500 rows for perf).
             # Wrapped in try/except so column-width failures never prevent the download.
             try:
+                # Explicitly clear any default column width that could override per-column widths
+                ws.sheet_format.defaultColWidth = None
+
                 sample_df = cleaned_df.head(500)
                 for col_idx, col_name in enumerate(cleaned_df.columns, start=1):
                     col_letter = get_column_letter(col_idx)
@@ -454,13 +562,24 @@ def download_cleaned_dataset(
                     else:
                         val_lens = []
                     max_len = max([header_len] + val_lens) if val_lens else header_len
-                    # Cap at 50 to avoid absurdly wide columns from long text values
-                    # Min of 12 ensures narrow columns are still readable
-                    ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
-            except Exception:  # noqa: BLE001
+                    # Cap at 60 to avoid absurdly wide columns from long text values
+                    # Min of 14 ensures narrow columns are still comfortably readable
+                    computed_width = min(max(max_len + 3, 14), 60)
+                    ws.column_dimensions[col_letter].width = computed_width
+                logger.info(
+                    "Column widths auto-sized for %d columns (sample size: %d rows)",
+                    len(cleaned_df.columns), len(sample_df),
+                )
+            except Exception as exc:  # noqa: BLE001
                 # If column-width auto-sizing fails for any reason, the Excel file
                 # is still valid — just with default column widths.
-                pass
+                logger.warning("Column width auto-sizing failed: %s", exc)
+
+            # Final: ensure worksheet has no protection and is completely editable.
+            # Done AFTER all formatting to guarantee nothing re-enables protection.
+            ws.protection.disable()
+            ws.protection.sheet = False
+
 
         content = output.getvalue()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -785,7 +904,7 @@ def chat_endpoint(req: ChatRequestSchema, db: Session = Depends(get_db)) -> dict
     full_prompt = f"{context}User question: {req.message}"
 
     client = genai.Client(api_key=api_key)
-    models_to_try = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+    models_to_try = GEMINI_MODELS_TO_TRY
 
     # --- Phase 2: define propose_cleaning_action as a Gemini function tool ---
     allowed_ops_desc = ", ".join(sorted(ALLOWED_OPERATIONS))

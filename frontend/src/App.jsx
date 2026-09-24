@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import {
   BarChart, Bar,
   LineChart, Line,
@@ -791,7 +793,11 @@ function ChartBuilder({ datasetId, columns, onChartDataFetched }) {
 // ---------------------------------------------------------------------------
 // ChartPanel — a single independently-configurable chart slot in the Visualize workspace
 // ---------------------------------------------------------------------------
-function ChartPanel({ index, datasetId, columns, onRemove }) {
+const ChartPanel = forwardRef(function ChartPanel({ index, datasetId, columns, onRemove }, ref) {
+  const panelRef = useRef(null);
+  // Expose the DOM node to the parent via the forwarded ref
+  useImperativeHandle(ref, () => panelRef.current);
+
   const allCols = columns || [];
   const catCols = allCols.filter((c) => isCategoricalType(c.inferred_type, c.dtype));
   const numCols = allCols.filter((c) => isNumericType(c.inferred_type, c.dtype));
@@ -863,7 +869,7 @@ function ChartPanel({ index, datasetId, columns, onRemove }) {
   };
 
   return (
-    <div className="viz-panel">
+    <div className="viz-panel" ref={panelRef}>
       <div className="viz-panel-header">
         <div className="viz-panel-ctrl">
           <label className="chart-label">Type</label>
@@ -967,12 +973,12 @@ function ChartPanel({ index, datasetId, columns, onRemove }) {
       )}
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // VisualizeWorkspace — full-page workspace with column sidebar + chart grid
 // ---------------------------------------------------------------------------
-function VisualizeWorkspace({ datasetId, columns }) {
+function VisualizeWorkspace({ datasetId, columns, datasetFilename }) {
   // panels: array of 4 slots, each either { active: true } or { active: false }
   const [panels, setPanels] = useState([
     { active: true, key: 0 },
@@ -981,6 +987,8 @@ function VisualizeWorkspace({ datasetId, columns }) {
     { active: false, key: 3 },
   ]);
   const nextKeyRef = useRef(4);
+  const panelRefs = useRef([null, null, null, null]);
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   const activePanelCount = panels.filter((p) => p.active).length;
 
@@ -994,6 +1002,64 @@ function VisualizeWorkspace({ datasetId, columns }) {
     setPanels((prev) => prev.map((p, i) =>
       i === slotIdx ? { ...p, active: false, key: nextKeyRef.current++ } : p
     ));
+  };
+
+  const handleExportPdf = async () => {
+    setPdfExporting(true);
+    try {
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+
+      // Header on first page
+      pdf.setFontSize(14);
+      pdf.setTextColor(40, 40, 40);
+      pdf.text(datasetFilename || "Dataset", margin, margin + 6);
+      pdf.setFontSize(10);
+      pdf.setTextColor(120, 120, 120);
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, margin + 14);
+
+      let chartIdx = 0;
+      for (let i = 0; i < panels.length; i++) {
+        if (!panels[i].active) continue;
+        const node = panelRefs.current[i];
+        if (!node) continue;
+
+        if (chartIdx > 0) pdf.addPage();
+
+        try {
+          const canvas = await html2canvas(node, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: "#ffffff",
+            logging: false,
+          });
+          const imgData = canvas.toDataURL("image/png");
+          const imgW = pageW - margin * 2;
+          const imgH = (canvas.height / canvas.width) * imgW;
+          const yOffset = chartIdx === 0 ? margin + 20 : margin;
+          const finalH = Math.min(imgH, pageH - yOffset - margin);
+          pdf.addImage(imgData, "PNG", margin, yOffset, imgW, finalH);
+        } catch (err) {
+          console.warn(`Failed to capture chart panel ${i}:`, err);
+        }
+        chartIdx++;
+      }
+
+      if (chartIdx === 0) {
+        pdf.setFontSize(12);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text("No active charts to export.", margin, margin + 30);
+      }
+
+      const stem = (datasetFilename || "charts").replace(/\.[^.]+$/, "");
+      pdf.save(`${stem}_charts.pdf`);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+    } finally {
+      setPdfExporting(false);
+    }
   };
 
   return (
@@ -1013,6 +1079,15 @@ function VisualizeWorkspace({ datasetId, columns }) {
             );
           })}
         </div>
+        {/* PDF export button */}
+        <button
+          className="viz-pdf-export-btn"
+          onClick={handleExportPdf}
+          disabled={pdfExporting || activePanelCount === 0}
+          title="Download all active charts as a PDF"
+        >
+          {pdfExporting ? "Exporting…" : "📄 Download as PDF"}
+        </button>
       </aside>
 
       {/* --- Chart grid --- */}
@@ -1021,6 +1096,7 @@ function VisualizeWorkspace({ datasetId, columns }) {
           panel.active ? (
             <ChartPanel
               key={panel.key}
+              ref={(el) => { panelRefs.current[idx] = el; }}
               index={idx}
               datasetId={datasetId}
               columns={columns}
@@ -1760,6 +1836,7 @@ function FixIndividualValuesSection({
             <div className="fix-table-header">
               <span>Raw Value</span>
               <span>Issue / Reason</span>
+              <span>Confidence</span>
               <span>Suggested / New Value</span>
               <span>Action</span>
             </div>
@@ -1793,6 +1870,18 @@ function FixIndividualValuesSection({
                     <span className="fix-reason-text">
                       {item.reason || "Flagged quality issue"}
                     </span>
+                  </div>
+                  <div className="fix-td-confidence">
+                    {item.confidence != null ? (
+                      <span className={`confidence-badge ${
+                        item.confidence >= 90 ? 'conf-high' :
+                        item.confidence >= 70 ? 'conf-medium' : 'conf-low'
+                      }`}>
+                        {item.confidence}%
+                      </span>
+                    ) : (
+                      <span className="confidence-badge conf-na">—</span>
+                    )}
                   </div>
                   <div className="fix-td-input">
                     <input
@@ -2518,7 +2607,7 @@ export default function App() {
           </div>
 
           {/* ========== CLEAN TAB ========== */}
-          {activeTab === "clean" && (<>
+          <div style={{ display: activeTab === "clean" ? "block" : "none" }}>
 
           <div className="ledger-header">Columns</div>
           {displayReport.columns?.map((col, idx) => (
@@ -2738,15 +2827,16 @@ export default function App() {
             ← Profile another file
           </button>
 
-          </>)}
+          </div>
 
           {/* ========== VISUALIZE TAB ========== */}
-          {activeTab === "visualize" && (
+          <div style={{ display: activeTab === "visualize" ? "block" : "none" }}>
             <VisualizeWorkspace
               datasetId={displayReport.dataset_id}
               columns={displayReport.columns || []}
+              datasetFilename={displayReport.filename}
             />
-          )}
+          </div>
         </div>
       )}
 
