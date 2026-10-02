@@ -17,6 +17,7 @@ class Dataset(Base):
     __tablename__ = "datasets"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    user_id = Column(String, nullable=False, index=True)  # Supabase user UUID
     filename = Column(String, nullable=False)
     raw_storage_path = Column(String, nullable=False)
     profile_json = Column(JSON, nullable=False)

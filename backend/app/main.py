@@ -20,6 +20,8 @@ from google import genai
 import numpy as np
 import pandas as pd
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
+
+from app.auth import AuthenticatedUser, get_current_user
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -38,7 +40,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-app = FastAPI(title="Data Analyst Copilot API", version="0.1.0")
+app = FastAPI(title="Datalyst API", version="0.1.0")
 
 # CORS — configurable via ALLOWED_ORIGINS env var (comma-separated).
 # Defaults to both common Vite dev ports so a port shift doesn't silently break the app.
@@ -57,6 +59,12 @@ app.add_middleware(
 
 # In-memory dataset store, keyed by dataset_id. Fine for a single-user local MVP.
 DATASETS: dict[str, pd.DataFrame] = {}
+
+
+def _verify_ownership(dataset: "Dataset", user: AuthenticatedUser) -> None:
+    """Raise 403 if the dataset does not belong to the authenticated user."""
+    if dataset.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Access denied: you do not own this dataset.")
 
 
 @app.on_event("startup")
@@ -96,9 +104,36 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/datasets")
+def list_datasets(
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return all datasets owned by the authenticated user."""
+    datasets = (
+        db.query(Dataset)
+        .filter(Dataset.user_id == user.id)
+        .order_by(Dataset.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": ds.id,
+            "filename": ds.filename,
+            "created_at": ds.created_at.isoformat() if ds.created_at else None,
+            "has_cleaned": ds.cleaned_storage_path is not None,
+            "row_count": ds.profile_json.get("row_count") if ds.profile_json else None,
+            "column_count": ds.profile_json.get("column_count") if ds.profile_json else None,
+        }
+        for ds in datasets
+    ]
+
+
 @app.post("/upload")
 async def upload_dataset(
-    file: UploadFile = File(...), db: Session = Depends(get_db)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     raw = await file.read()
     if not raw:
@@ -119,6 +154,7 @@ async def upload_dataset(
 
     dataset = Dataset(
         id=dataset_id,
+        user_id=user.id,
         filename=filename,
         raw_storage_path=raw_path,
         profile_json=report,
@@ -130,12 +166,13 @@ async def upload_dataset(
 
 
 @app.get("/datasets/{dataset_id}/profile")
-def get_profile(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_profile(dataset_id: str, db: Session = Depends(get_db), user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
     df = DATASETS.get(dataset_id)
     if df is None:
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
+        _verify_ownership(dataset, user)
         storage = get_storage()
         try:
             raw_bytes = storage.load(dataset.raw_storage_path)
@@ -148,10 +185,10 @@ def get_profile(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any
 
 
 @app.get("/datasets/{dataset_id}/suggestions")
-def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_suggestions(dataset_id: str, db: Session = Depends(get_db), user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
     df = DATASETS.get(dataset_id)
     if df is None:
-        profile = get_profile(dataset_id, db)
+        profile = get_profile(dataset_id, db, user)
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         storage = get_storage()
         raw_bytes = storage.load(dataset.raw_storage_path)
@@ -165,7 +202,7 @@ def get_suggestions(dataset_id: str, db: Session = Depends(get_db)) -> dict[str,
 
 
 @app.get("/datasets/{dataset_id}/validation")
-def get_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_validation(dataset_id: str, db: Session = Depends(get_db), user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
     """Run the centralised 47-type validation rules engine on every column."""
     from app.validation_rules import validate_column, detect_semantic_type, detect_dataset_level_issues
 
@@ -174,6 +211,7 @@ def get_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, 
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
+        _verify_ownership(dataset, user)
         storage = get_storage()
         raw_bytes = storage.load(dataset.raw_storage_path)
         df = _parse_dataframe(dataset.filename, raw_bytes)
@@ -199,7 +237,7 @@ def get_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, 
 
 
 @app.get("/datasets/{dataset_id}/cross-column-validation")
-def get_cross_column_validation(dataset_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_cross_column_validation(dataset_id: str, db: Session = Depends(get_db), user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
     """Run cross-column validation rules (DOB↔Age, Start↔End, Qty×Price, etc.)."""
     from app.validation_rules import run_all_cross_column_validations
 
@@ -208,6 +246,7 @@ def get_cross_column_validation(dataset_id: str, db: Session = Depends(get_db)) 
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
+        _verify_ownership(dataset, user)
         storage = get_storage()
         raw_bytes = storage.load(dataset.raw_storage_path)
         df = _parse_dataframe(dataset.filename, raw_bytes)
@@ -222,11 +261,13 @@ def get_cross_column_validation(dataset_id: str, db: Session = Depends(get_db)) 
 
 @app.post("/datasets/{dataset_id}/pipeline")
 def save_pipeline(
-    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db)
+    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
+    _verify_ownership(dataset, user)
 
     if isinstance(steps, dict):
         raw_list = steps.get("suggestions") or steps.get("steps") or []
@@ -265,10 +306,11 @@ def save_pipeline(
 
 
 @app.get("/datasets/{dataset_id}/pipeline")
-def get_pipeline(dataset_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def get_pipeline(dataset_id: str, db: Session = Depends(get_db), user: AuthenticatedUser = Depends(get_current_user)) -> list[dict[str, Any]]:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
+    _verify_ownership(dataset, user)
 
     steps = (
         db.query(PipelineStep)
@@ -292,11 +334,13 @@ def get_pipeline(dataset_id: str, db: Session = Depends(get_db)) -> list[dict[st
 
 @app.post("/datasets/{dataset_id}/apply")
 def apply_cleaning_pipeline(
-    dataset_id: str, db: Session = Depends(get_db)
+    dataset_id: str, db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
+    _verify_ownership(dataset, user)
 
     steps = (
         db.query(PipelineStep)
@@ -336,7 +380,8 @@ def apply_cleaning_pipeline(
 
 @app.post("/datasets/{dataset_id}/preview")
 def preview_cleaning_pipeline(
-    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db)
+    dataset_id: str, steps: list[StepSchema] | dict[str, Any] = Body(...), db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Dry-run the given steps in memory (no save, no DB write).
 
@@ -350,6 +395,7 @@ def preview_cleaning_pipeline(
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
+        _verify_ownership(dataset, user)
         storage = get_storage()
         try:
             raw_bytes = storage.load(dataset.raw_storage_path)
@@ -462,12 +508,14 @@ def download_cleaned_dataset(
     dataset_id: str,
     format: str = Query("csv", pattern="^(csv|xlsx)$"),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> Response:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset or not dataset.cleaned_storage_path:
         raise HTTPException(
             status_code=404, detail="Cleaned dataset not available. Apply cleaning first."
         )
+    _verify_ownership(dataset, user)
 
     storage = get_storage()
     try:
@@ -608,6 +656,7 @@ def get_chart_data(
     agg: str = Query("count", regex="^(count|sum|mean)$"),
     use_cleaned: bool = Query(True, description="Prefer cleaned dataset if available"),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return chart-ready aggregated data for the given dataset.
 
@@ -616,6 +665,7 @@ def get_chart_data(
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
+    _verify_ownership(dataset, user)
 
     # --- Load the appropriate dataframe ---
     storage = get_storage()

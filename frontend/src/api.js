@@ -1,11 +1,38 @@
+import { supabase } from "./supabaseClient";
+
 const API_BASE = "http://localhost:8000";
+
+/**
+ * Get the current session's access token for Authorization headers.
+ * Returns null if not authenticated.
+ */
+async function getAuthToken() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session?.access_token || null;
+}
+
+/**
+ * Build headers object with Authorization bearer token (if available)
+ * merged with any extra headers.
+ */
+async function authHeaders(extra = {}) {
+  const token = await getAuthToken();
+  const headers = { ...extra };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export async function uploadDataset(file) {
   const formData = new FormData();
   formData.append("file", file);
 
+  const headers = await authHeaders();
+
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
+    headers,
     body: formData,
   });
 
@@ -17,8 +44,21 @@ export async function uploadDataset(file) {
   return res.json();
 }
 
+export async function listDatasets() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/datasets`, { headers });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Failed to list datasets (${res.status})`);
+  }
+
+  return res.json();
+}
+
 export async function getSuggestions(datasetId) {
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/suggestions`);
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/suggestions`, { headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -29,9 +69,10 @@ export async function getSuggestions(datasetId) {
 }
 
 export async function savePipeline(datasetId, steps) {
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/pipeline`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(steps),
   });
 
@@ -44,8 +85,10 @@ export async function savePipeline(datasetId, steps) {
 }
 
 export async function applyPipeline(datasetId) {
+  const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/apply`, {
     method: "POST",
+    headers,
   });
 
   if (!res.ok) {
@@ -57,9 +100,10 @@ export async function applyPipeline(datasetId) {
 }
 
 export async function previewPipeline(datasetId, steps) {
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(steps),
   });
 
@@ -72,7 +116,8 @@ export async function previewPipeline(datasetId, steps) {
 }
 
 export async function getPipeline(datasetId) {
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/pipeline`);
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/pipeline`, { headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -87,8 +132,9 @@ export function getDownloadUrl(datasetId, format = "csv") {
 }
 
 export async function downloadCleanedFile(datasetId, format = "csv", fallbackFilename = "cleaned_dataset") {
+  const headers = await authHeaders();
   const url = getDownloadUrl(datasetId, format);
-  const res = await fetch(url);
+  const res = await fetch(url, { headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -125,9 +171,10 @@ export async function sendChatMessage(message, datasetId = null, chartContext = 
   const body = { message, dataset_id: datasetId };
   if (chartContext) body.chart_context = chartContext;
 
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -146,7 +193,8 @@ export async function getChartData(datasetId, { chartType, x, y, agg, useCleaned
   if (y) params.append("y", y);
   if (useCleaned !== undefined) params.append("use_cleaned", String(useCleaned));
 
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/chart-data?${params}`);
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/chart-data?${params}`, { headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Chart data failed (${res.status})`);

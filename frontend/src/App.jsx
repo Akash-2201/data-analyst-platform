@@ -21,7 +21,10 @@ import {
   downloadCleanedFile,
   sendChatMessage,
   getChartData,
+  listDatasets,
 } from "./api";
+import { supabase } from "./supabaseClient";
+import AuthScreen from "./AuthScreen";
 import ReactMarkdown from "react-markdown";
 import "./App.css";
 
@@ -2760,6 +2763,15 @@ function DatasetIssuesCard({ issues = [], selectedIds, onToggle }) {
 }
 
 export default function App() {
+  // --- Auth State ---
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // --- Past datasets list ---
+  const [pastDatasets, setPastDatasets] = useState([]);
+  const [pastDatasetsLoading, setPastDatasetsLoading] = useState(false);
+
+  // --- Dataset and report state ---
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -2800,6 +2812,66 @@ export default function App() {
 
   // Per-column manual value overrides: { [columnName]: { [rowIndexOrRaw]: newValue } }
   const [manualValueOverrides, setManualValueOverrides] = useState({});
+
+  // Check for existing session on mount and listen for auth changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    resetAll();
+    setPastDatasets([]);
+  };
+
+  const fetchPastDatasets = useCallback(async () => {
+    setPastDatasetsLoading(true);
+    try {
+      const ds = await listDatasets();
+      setPastDatasets(ds);
+    } catch {
+      // Silently ignore — not critical
+    } finally {
+      setPastDatasetsLoading(false);
+    }
+  }, []);
+
+  // Fetch past datasets when session is established and no report is open
+  useEffect(() => {
+    if (session && !report) {
+      fetchPastDatasets();
+    }
+  }, [session, report, fetchPastDatasets]);
+
+  const handleOpenPastDataset = async (ds) => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch the profile from the backend to populate the report
+      const headers = {};
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.access_token) {
+        headers["Authorization"] = `Bearer ${sessionData.session.access_token}`;
+      }
+      const profileRes = await fetch(`http://localhost:8000/datasets/${ds.id}/profile`, { headers });
+      if (!profileRes.ok) throw new Error("Failed to load dataset profile");
+      const profile = await profileRes.json();
+      setReport({ dataset_id: ds.id, filename: ds.filename, ...profile });
+      fetchSuggestions(ds.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleFile = async (file) => {
     setLoading(true);
@@ -3286,18 +3358,32 @@ export default function App() {
   const cleanColumnCount = columnResults.filter((c) => c.status === "clean").length;
   const issueColumnCount = columnResults.filter((c) => c.status === "has_issues").length;
 
+  // --- Auth gate ---
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--paper)" }}>
+        <div style={{ color: "var(--ink-soft)", fontSize: 14 }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthScreen onAuth={(s) => setSession(s)} />;
+  }
+
   return (
     <div className={`page${activeTab === "visualize" ? " viz-active" : ""}`}>
       {/* --- Top Navbar --- */}
       <nav className="app-navbar">
         <div className="app-navbar-logo">
-          <span className="logo-icon">DA</span>
-          Data Analyst Copilot
+          <img src="/datalyst-icon.svg" alt="Datalyst" className="navbar-brand-icon" />
+          <span className="navbar-brand-text">Datalyst</span>
         </div>
         {displayReport && (
           <span className="active-file-pill">{displayReport.filename}</span>
         )}
         <div className="navbar-spacer" />
+        <span className="navbar-user-email">{session.user?.email}</span>
         {displayReport && (
           <>
             <button className="navbar-btn" onClick={resetAll}>
@@ -3306,18 +3392,129 @@ export default function App() {
             </button>
           </>
         )}
+        <button className="navbar-btn logout" onClick={handleLogout}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Log out
+        </button>
       </nav>
 
-      <div className={`masthead${displayReport ? " has-report" : ""}`}>
-        <p className="eyebrow">Data profiler & cleaner · step 1 & 2</p>
-        <h1>What's actually in your data</h1>
-        <p>
-          Upload a raw file to get an automatic audit: types, missing values,
-          duplicates, and outliers, before review and rule-based cleaning.
-        </p>
-      </div>
+      {!displayReport ? (
+        <div className="landing-hero-container">
+          <div className="landing-bg-glow-violet" />
+          <div className="landing-bg-glow-emerald" />
+          <div className="landing-bg-grid" />
 
-      {!report && <Dropzone onFile={handleFile} disabled={loading} />}
+          <div className="landing-hero-content">
+            <div className="landing-hero-badge">
+              <img src="/datalyst-icon.svg" alt="Datalyst" className="landing-hero-icon" />
+              <span className="landing-hero-tag">DATA INTELLIGENCE PLATFORM</span>
+            </div>
+
+            <h1 className="landing-headline">
+              Clean, analyze, and <span className="headline-gradient">understand your data</span>
+            </h1>
+            <p className="landing-lead">
+              Upload raw datasets → detect anomalies & clean rules → visualize distributions → ask questions with AI.
+            </p>
+
+            <div className="landing-feature-strip">
+              <div className="landing-feature-card">
+                <div className="landing-feature-icon-wrap violet">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="m11 8 2 3-3 2"/></svg>
+                </div>
+                <div className="landing-feature-info">
+                  <span className="landing-feature-title">Detect Issues</span>
+                  <span className="landing-feature-desc">Types, missing & outliers</span>
+                </div>
+              </div>
+
+              <div className="landing-feature-card">
+                <div className="landing-feature-icon-wrap emerald">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                </div>
+                <div className="landing-feature-info">
+                  <span className="landing-feature-title">AI Suggestions</span>
+                  <span className="landing-feature-desc">1-click smart cleaning</span>
+                </div>
+              </div>
+
+              <div className="landing-feature-card">
+                <div className="landing-feature-icon-wrap cyan">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </div>
+                <div className="landing-feature-info">
+                  <span className="landing-feature-title">Visualize Fast</span>
+                  <span className="landing-feature-desc">Charts & distributions</span>
+                </div>
+              </div>
+
+              <div className="landing-feature-card">
+                <div className="landing-feature-icon-wrap amber">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </div>
+                <div className="landing-feature-info">
+                  <span className="landing-feature-title">Export Clean Data</span>
+                  <span className="landing-feature-desc">CSV, Excel & rules</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="masthead has-report">
+          <p className="eyebrow">Datalyst · profile & clean</p>
+          <h1>What's actually in your data</h1>
+          <p>
+            Upload a raw file to get an automatic audit: types, missing values,
+            duplicates, and outliers, before review and rule-based cleaning.
+          </p>
+        </div>
+      )}
+
+      {!report && (
+        <div className="landing-dropzone-container">
+          <Dropzone onFile={handleFile} disabled={loading} />
+
+          {/* --- Past Datasets --- */}
+          {pastDatasets.length > 0 && (
+            <div className="dataset-list-section">
+              <div className="ledger-header">Your previous datasets</div>
+              <div className="dataset-list">
+                {pastDatasets.map((ds) => (
+                  <div
+                    key={ds.id}
+                    className="dataset-list-item"
+                    onClick={() => handleOpenPastDataset(ds)}
+                  >
+                    <div className="dataset-list-item-icon">📄</div>
+                    <div className="dataset-list-item-info">
+                      <div className="dataset-list-item-name">{ds.filename}</div>
+                      <div className="dataset-list-item-meta">
+                        {ds.row_count != null && <span>{ds.row_count.toLocaleString()} rows</span>}
+                        {ds.column_count != null && <span>{ds.column_count} cols</span>}
+                        {ds.created_at && (
+                          <span>
+                            {new Date(ds.created_at).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </span>
+                        )}
+                        {ds.has_cleaned && <span className="cleaned-badge">✓ Cleaned</span>}
+                      </div>
+                    </div>
+                    <span className="dataset-list-item-arrow">→</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {pastDatasetsLoading && (
+            <div className="dataset-list-empty">Loading your datasets…</div>
+          )}
+        </div>
+      )}
       {error && <div className="error-banner">{error}</div>}
 
       {displayReport && (

@@ -6,3 +6,5 @@ openpyxl==3.1.5
 sqlalchemy>=2.0.0
 google-genai
 python-dotenv
+supabase>=2.0.0
+PyJWT>=2.0.0
