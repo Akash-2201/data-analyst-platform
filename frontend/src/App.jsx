@@ -1334,7 +1334,11 @@ const ChartPanel = forwardRef(function ChartPanel(
     const ag = overrides.agg ?? agg;
 
     if (!datasetId) return;
-    if (!isHeatmap && !xc) return;
+    // Use ct (the override-aware type) rather than stale React state
+    const ctIsHeatmap = ct === "heatmap";
+    const ctIsKPI = ct === "kpi";
+    // KPI and heatmap don't strictly require an X column
+    if (!ctIsHeatmap && !ctIsKPI && !xc) return;
 
     setLoading(true);
     setError(null);
@@ -1347,9 +1351,12 @@ const ChartPanel = forwardRef(function ChartPanel(
       else if (ct === "map" && yc) fetchY = yc;
       else fetchY = undefined;
 
+      // KPI: ensure at least x is sent (use first available column)
+      const fetchX = xc || (ctIsKPI ? (yc || "") : "");
+
       const data = await getChartData(datasetId, {
         chartType: ct,
-        x: xc,
+        x: fetchX,
         y: fetchY,
         agg: ag,
         useCleaned: true,

@@ -745,9 +745,36 @@ def _validate_and_enrich(
 
     col_lower = column.lower()
     is_phone = (col_lower in ("phone", "mobile", "contact_no")) or ("phone" in col_lower)
+    is_email = (col_lower in ("email", "e-mail", "mail")) or ("email" in col_lower)
     if is_phone and operation in ("coerce_numeric", "flag_negative_values", "clip_negative_to_null", "remove_outliers"):
         logger.info("Rejected numeric operation %r for phone column %r", operation, column)
         return None
+
+    # Block fill_missing with mode/mean/median for PII / unique-per-person columns.
+    # Filling an email column with the mode would copy a real person's actual email
+    # to rows where it doesn't belong — factually false data.
+    _PII_TYPES = {
+        "email", "phone", "name", "id", "handle", "address",
+        "uuid", "payment_id", "transaction_id", "product_code",
+        "url", "ip_address", "filepath",
+    }
+    if operation == "fill_missing" and column in df.columns:
+        strategy = (raw.get("params") or {}).get("strategy", "")
+        if strategy in ("mode", "mean", "median"):
+            is_pii = is_phone or is_email
+            if not is_pii:
+                # Check by inferred name hints
+                from app.validation_rules import detect_semantic_type
+                eff_type = detect_semantic_type(df[column], column)
+                if eff_type in _PII_TYPES:
+                    is_pii = True
+            if is_pii:
+                logger.info(
+                    "Rejected fill_missing(strategy=%r) for PII column %r — "
+                    "would fabricate real values",
+                    strategy, column,
+                )
+                return None
 
     if operation == "manual_value_override":
         params["overrides"] = params.get("overrides", {})
@@ -1083,10 +1110,30 @@ def generate_ai_suggestions(
             r_act = rs.get("action")
             if not r_col:
                 continue
-            if r_act not in ("standardize_category", "standardize_date_format"):
-                if r_act not in covered_actions_by_col.get(r_col, set()):
+            if r_act in ("standardize_category", "standardize_date_format"):
+                continue
+            # flag_invalid_* suggestions from the rule engine are authoritative --
+            # they carry real flagged_values, unlike any same-named placeholder
+            # Gemini's general prompt might propose. The rule engine's version
+            # always wins for these, even if Gemini already proposed one.
+            if r_act.startswith("flag_invalid_"):
+                validated[:] = [
+                    v for v in validated
+                    if not (
+                        v.get("action") == r_act
+                        and (v.get("params") or {}).get("column") == r_col
+                        and not v.get("flagged_values")
+                    )
+                ]
+                if not any(
+                    v.get("action") == r_act and (v.get("params") or {}).get("column") == r_col
+                    for v in validated
+                ):
                     validated.append(rs)
                     covered_actions_by_col.setdefault(r_col, set()).add(r_act)
+            elif r_act not in covered_actions_by_col.get(r_col, set()):
+                validated.append(rs)
+                covered_actions_by_col.setdefault(r_col, set()).add(r_act)
 
         logger.info(
             "AI suggestions: %d valid out of %d from Gemini, %d general notes",

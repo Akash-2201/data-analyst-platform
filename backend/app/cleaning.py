@@ -214,6 +214,23 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
         is_email_col = (inferred_type == "email") or any(k in col_lower for k in ("email", "e-mail"))
 
         # Missing values
+        # PII / unique-per-person column types must NEVER be offered
+        # fill_mode/fill_mean/fill_median — doing so would fabricate a real
+        # person's actual value on a row where it doesn't belong.  The only
+        # valid options for these types are drop_missing (remove the row) or
+        # flag_missing (leave as null).
+        _PII_TYPES = {
+            "email", "phone", "name", "id", "handle", "address",
+            "uuid", "payment_id", "transaction_id", "product_code",
+            "url", "ip_address", "filepath",
+        }
+        is_pii_col = is_phone_col or is_email_col or inferred_type in _PII_TYPES
+        # Also catch by effective_type (which runs the full 47-type detector)
+        if not is_pii_col:
+            _eff = detect_semantic_type(col_series, col_name)
+            if _eff in _PII_TYPES:
+                is_pii_col = True
+
         if missing_count > 0:
             if missing_pct >= 50.0:
                 suggestions.append({
@@ -223,7 +240,24 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "description": f"Drop column '{col_name}' ({missing_pct}% missing values)",
                     "severity": "high",
                 })
-            elif not is_phone_col and not is_email_col and inferred_type in ("numeric", "non_negative_numeric", "identifier"):
+            elif is_pii_col:
+                # PII columns: only offer drop_missing (never fill with a
+                # fabricated or mode-copied real value)
+                suggestions.append({
+                    "id": str(uuid.uuid4()),
+                    "action": "drop_missing",
+                    "params": {"column": col_name},
+                    "description": (
+                        f"Drop {missing_count} row{'s' if missing_count > 1 else ''} "
+                        f"with missing '{col_name}' (unique-per-person column — "
+                        f"filling with mode would fabricate data)"
+                    ),
+                    "severity": "medium",
+                })
+            elif (
+                inferred_type in ("numeric", "non_negative_numeric", "identifier", "currency", "salary", "percentage", "marks", "rating", "integer", "float")
+                or (col_name in df.columns and pd.api.types.is_numeric_dtype(df[col_name]))
+            ):
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "fill_missing",
@@ -251,7 +285,9 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
         elif is_email_col:
             effective_type = "email"
 
+        print(f"[DEBUG LOG] cleaning.py: col_name='{col_name}', effective_type='{effective_type}', is_phone_col={is_phone_col}, is_email_col={is_email_col}", flush=True)
         rule_fn = COLUMN_TYPE_RULES.get(effective_type)
+        print(f"[DEBUG LOG] cleaning.py: rule_fn found={rule_fn is not None}", flush=True)
         if rule_fn is not None:
             flagged_items = rule_fn(col_series, col_name)
             if flagged_items:

@@ -907,7 +907,7 @@ def get_chart_data(
     if chart_type == "kpi":
         target_col = y if (y and y in df.columns) else x
         num_s = pd.to_numeric(df[target_col], errors="coerce")
-        is_numeric = num_s.dropna().count() > 0
+        is_numeric = bool(num_s.dropna().count() > 0)
         total_rows = len(df)
         non_null_count = int(df[target_col].notna().sum())
         unique_count = int(df[target_col].nunique())
@@ -1127,10 +1127,14 @@ def get_chart_data(
     # -----------------------------------------------------------------------
     # Standard aggregation for bar / line / scatter / pie / area / funnel / treemap
     # -----------------------------------------------------------------------
+    # Drop rows where X-axis value is NaN/null — these would otherwise appear
+    # as a literal "nan" category on the chart.
+    chart_df = df[df[x].notna()].copy() if x in df.columns else df.copy()
+
     try:
         if agg == "count" or y is None:
             grouped = (
-                df[x]
+                chart_df[x]
                 .astype(str)
                 .value_counts()
                 .head(MAX_GROUPS)
@@ -1140,7 +1144,7 @@ def get_chart_data(
             y_label = "Count"
         elif agg == "sum":
             grouped = (
-                df.groupby(x)[y]
+                chart_df.groupby(x)[y]
                 .sum()
                 .reset_index()
                 .rename(columns={x: "label", y: "value"})
@@ -1149,7 +1153,7 @@ def get_chart_data(
             y_label = f"Sum of {y}"
         else:  # mean
             grouped = (
-                df.groupby(x)[y]
+                chart_df.groupby(x)[y]
                 .mean()
                 .reset_index()
                 .rename(columns={x: "label", y: "value"})
@@ -1161,6 +1165,9 @@ def get_chart_data(
 
     if chart_type == "funnel":
         grouped = grouped.sort_values("value", ascending=False)
+
+    # Filter out any lingering "nan" string labels (e.g. from .astype(str) on NaN leftovers)
+    grouped = grouped[~grouped["label"].astype(str).str.lower().isin(["nan", "none", "null"])]
 
     # Convert to JSON-safe types
     labels = [str(v) for v in grouped["label"].tolist()]
@@ -1174,7 +1181,7 @@ def get_chart_data(
         "values": values,
         "chart_type": chart_type,
         "x_label": x,
-        "y_label": y_label if (agg != "count" and y) else "Count",
+        "y_label": y_label,
         "row_count": len(df),
         "group_count": len(labels),
     }
