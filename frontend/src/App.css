@@ -5,9 +5,19 @@
 /* --- Page Layout --- */
 
 .page {
-  max-width: 920px;
+  max-width: 1000px;
   margin: 0 auto;
   padding: 0 24px 96px;
+  position: relative;
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* When report is loaded, page needs positioning context for the subtle bg */
+.page.has-report-bg {
+  position: relative;
+  overflow: hidden;
 }
 
 /* --- App Navbar --- */
@@ -183,10 +193,115 @@
   overflow: hidden;
   padding: 56px 20px 32px;
   margin: 0 -24px 20px;
+  width: calc(100% + 48px);
+  max-width: calc(100% + 48px);
+  box-sizing: border-box;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
+  background: #09090B;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.07) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(52, 211, 153, 0.05) 0%, transparent 60%);
+  min-height: 400px;
+}
+
+/* =====================================================================
+   DataStream Background — Landing Page (Full Intensity, Dark Context)
+   ===================================================================== */
+.datastream-landing {
+  z-index: 0;
+  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Override the landing glow blobs to layer correctly above the datastream */
+.landing-hero-container .landing-bg-glow-violet,
+.landing-hero-container .landing-bg-glow-emerald {
+  z-index: 1;
+}
+
+.landing-hero-container .landing-bg-grid {
+  z-index: 1;
+}
+
+/* =====================================================================
+   DataStream Background — Report Page (Subtle: scan lines + particles)
+   ===================================================================== */
+.datastream-report {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  opacity: 0.06;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Adapt the scan line / beam colors for the light page background */
+.datastream-report .datastream-beam-primary {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.15) 12%,
+    rgba(99, 102, 241, 0.45) 40%,
+    rgba(139, 92, 246, 0.6) 70%,
+    rgba(139, 92, 246, 0.15) 90%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 10px rgba(99, 102, 241, 0.3),
+    0 0 20px rgba(139, 92, 246, 0.15);
+}
+
+.datastream-report .datastream-beam-secondary-top {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.2) 25%,
+    rgba(139, 92, 246, 0.28) 65%,
+    transparent 96%
+  );
+}
+
+.datastream-report .datastream-beam-secondary-bottom {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.25) 30%,
+    rgba(99, 102, 241, 0.22) 75%,
+    transparent 96%
+  );
+}
+
+/* Muted particles for the light background */
+.datastream-report .datastream-particle-emerald {
+  background: rgba(99, 102, 241, 0.7);
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.4), 0 0 12px rgba(99, 102, 241, 0.2);
+}
+
+.datastream-report .datastream-particle-violet {
+  background: rgba(139, 92, 246, 0.7);
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.4), 0 0 12px rgba(139, 92, 246, 0.2);
+}
+
+.datastream-report .datastream-particle-white {
+  background: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 4px rgba(99, 102, 241, 0.3);
+}
+
+/* Ensure all content cards sit above the subtle background */
+.page.has-report-bg .app-navbar,
+.page.has-report-bg .masthead,
+.page.has-report-bg .report-wrapper,
+.page.has-report-bg .landing-dropzone-container,
+.page.has-report-bg .chat-container {
+  position: relative;
+  z-index: 1;
 }
 
 /* Subtle data grid pattern using CSS gradients */
@@ -287,7 +402,7 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.16;
-  color: var(--ink);
+  color: #FFFFFF;
   margin: 0 0 14px;
   max-width: 22ch;
 }
@@ -302,7 +417,7 @@
 
 .landing-lead {
   font-size: 15.5px;
-  color: var(--ink-soft);
+  color: #A1A1AA;
   line-height: 1.65;
   max-width: 58ch;
   margin: 0 0 36px;
@@ -311,11 +426,12 @@
 /* Feature cards strip showing 4 primary capabilities */
 .landing-feature-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
   max-width: 820px;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .landing-feature-card {
@@ -329,6 +445,9 @@
   box-shadow: var(--shadow-sm);
   text-align: left;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .landing-feature-card:hover {
@@ -378,6 +497,8 @@
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .landing-feature-desc {
@@ -411,7 +532,7 @@
     font-size: 30px;
   }
   .landing-feature-strip {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -420,10 +541,13 @@
     font-size: 26px;
   }
   .landing-feature-strip {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .landing-hero-container {
     padding: 36px 16px 24px;
+    margin: 0 -12px 20px;
+    width: calc(100% + 24px);
+    max-width: calc(100% + 24px);
   }
 }
 
@@ -3058,11 +3182,136 @@ optgroup option {
   word-break: break-word;
 }
 
-/* --- Responsive --- */
+/* =====================================================================
+   Responsive Design — Hamburger Menu & Collapsible Navbar
+   ===================================================================== */
 
-@media (max-width: 900px) {
+/* Hamburger button — hidden by default (desktop), shown via media query */
+.navbar-hamburger {
+  display: none;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  padding: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.navbar-hamburger:hover {
+  background: var(--surface-alt);
+  border-color: #A1A1AA;
+}
+
+/* On desktop, collapsible items are always visible as a row */
+.navbar-collapsible {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* =====================================================================
+   Responsive Breakpoints
+   ===================================================================== */
+
+/* === LARGE MONITORS (>1440px) === */
+@media (min-width: 1441px) {
+  .page {
+    max-width: 1200px;
+  }
+
+  .page.viz-active {
+    max-width: 1600px;
+  }
+
+  /* Chart grid: 3 columns on large monitors */
+  .viz-grid {
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  }
+
+  /* Stat cards: can remain 3-column, just more spacious */
+  .stat-strip {
+    gap: 20px;
+  }
+}
+
+/* === DESKTOP (1024–1440px) === */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .page.viz-active {
+    max-width: 1400px;
+  }
+}
+
+/* === TABLET (640–1024px) === */
+@media (max-width: 1024px) {
+  .page {
+    max-width: 100%;
+    padding: 0 16px 72px;
+  }
+
+  .page.viz-active {
+    max-width: 100%;
+  }
+
+  /* Navbar: show hamburger, collapse items */
+  .navbar-hamburger {
+    display: flex;
+  }
+
+  .navbar-collapsible {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    flex-direction: column;
+    padding: 12px 16px;
+    gap: 8px;
+    box-shadow: var(--shadow-md);
+    z-index: 99;
+    animation: navSlideDown 0.2s ease-out;
+  }
+
+  .navbar-collapsible.open {
+    display: flex;
+  }
+
+  @keyframes navSlideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .navbar-collapsible .navbar-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .navbar-collapsible .navbar-user-email {
+    max-width: 100%;
+    text-align: center;
+    padding: 4px 0;
+  }
+
+  .app-navbar {
+    position: relative;
+    flex-wrap: nowrap;
+  }
+
+  /* Active file pill: shrink */
+  .active-file-pill {
+    max-width: 140px;
+    font-size: 11px;
+  }
+
+  /* Visualize workspace: stack vertically */
   .viz-workspace {
     flex-direction: column;
+    gap: 16px;
   }
 
   .viz-sidebar {
@@ -3070,6 +3319,7 @@ optgroup option {
     position: static;
     max-height: none;
     overflow-y: visible;
+    padding-right: 0;
   }
 
   .viz-col-list {
@@ -3080,17 +3330,396 @@ optgroup option {
 
   .viz-col-item {
     padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .viz-col-type-label {
+    display: none;
   }
 
   .viz-grid {
     grid-template-columns: 1fr;
   }
 
+  /* Stat cards: 2-column on tablet */
+  .stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  /* Column table grids: make scrollable horizontally */
+  .column-table-header,
+  .column-row {
+    min-width: 500px;
+  }
+
+  .cat-table-header,
+  .cat-table-row {
+    min-width: 480px;
+  }
+
+  .fix-table-header,
+  .fix-table-row {
+    min-width: 480px;
+  }
+
+  .date-table-header,
+  .date-table-row {
+    min-width: 480px;
+  }
+
+  .preview-value-header,
+  .preview-value-row {
+    min-width: 420px;
+  }
+
+  /* Chat panel: bigger on tablet */
+  .chat-panel {
+    width: min(420px, calc(100vw - 32px));
+    right: 16px;
+    bottom: 80px;
+  }
+
+  /* Landing features */
+  .landing-feature-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* === MOBILE (<640px) === */
+@media (max-width: 639px) {
+  .page {
+    max-width: 100%;
+    padding: 0 12px 64px;
+  }
+
+  .page.viz-active {
+    max-width: 100%;
+  }
+
+  /* Navbar: compact */
   .app-navbar {
-    flex-wrap: wrap;
+    position: relative;
     height: auto;
-    padding: 8px 16px;
+    padding: 8px 12px;
     gap: 8px;
+    margin: 0 -12px 0;
+    width: calc(100% + 24px);
+  }
+
+  .navbar-brand-text {
+    font-size: 14px;
+  }
+
+  .navbar-brand-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .navbar-hamburger {
+    display: flex;
+  }
+
+  .navbar-collapsible {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    flex-direction: column;
+    padding: 12px;
+    gap: 8px;
+    box-shadow: var(--shadow-md);
+    z-index: 99;
+  }
+
+  .navbar-collapsible.open {
+    display: flex;
+  }
+
+  .navbar-collapsible .navbar-btn {
+    width: 100%;
+    justify-content: center;
+    font-size: 13px;
+    padding: 10px 16px;
+  }
+
+  .navbar-collapsible .navbar-user-email {
+    max-width: 100%;
+    text-align: center;
+    font-size: 11px;
+    padding: 4px 0;
+  }
+
+  /* Hide active file pill on very small screens */
+  .active-file-pill {
+    display: none;
+  }
+
+  /* Masthead: smaller */
+  .masthead {
+    padding-top: 20px;
+    margin-bottom: 20px;
+  }
+
+  .masthead h1 {
+    font-size: 22px;
+  }
+
+  .masthead p {
+    font-size: 13px;
+  }
+
+  /* Stat cards: single column */
+  .stat-strip {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 16px 0 6px;
+    padding-bottom: 16px;
+  }
+
+  .stat {
+    padding: 16px;
+  }
+
+  .stat .stat-value {
+    font-size: 24px;
+  }
+
+  /* Column ledger: horizontal scroll wrapper */
+  .column-table-header,
+  .column-row {
+    min-width: 500px;
+  }
+
+  .cat-table-header,
+  .cat-table-row {
+    min-width: 480px;
+  }
+
+  .fix-table-header,
+  .fix-table-row {
+    min-width: 480px;
+  }
+
+  .date-table-header,
+  .date-table-row {
+    min-width: 480px;
+  }
+
+  .preview-value-header,
+  .preview-value-row {
+    min-width: 400px;
+  }
+
+  /* Tab switcher: scrollable */
+  .tab-switcher {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  /* Visualize: stack, sidebar becomes horizontal chip row */
+  .viz-workspace {
+    flex-direction: column;
+    gap: 12px;
+    min-height: auto;
+  }
+
+  .viz-sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+    flex-direction: column;
+  }
+
+  .viz-sidebar-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 4px 8px;
+  }
+
+  .viz-col-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+
+  .viz-col-item {
+    padding: 5px 8px;
+    font-size: 11px;
+    gap: 6px;
+  }
+
+  .viz-col-type-label {
+    display: none;
+  }
+
+  .viz-col-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+  }
+
+  .viz-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .viz-panel {
+    min-height: 300px;
+  }
+
+  .viz-panel-header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  /* Chat panel: near-fullscreen on mobile */
+  .chat-panel {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: calc(100vh - 60px);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 100vh;
+  }
+
+  .chat-toggle-btn {
+    bottom: 12px;
+    right: 12px;
+    width: 48px;
+    height: 48px;
+  }
+
+  /* Landing page: compact */
+  .landing-hero-container {
+    padding: 32px 12px 20px;
+    margin: 0 -12px 12px;
+    width: calc(100% + 24px);
+    max-width: calc(100% + 24px);
+    box-sizing: border-box;
+  }
+
+  .landing-headline {
+    font-size: 24px;
+  }
+
+  .landing-sub {
+    font-size: 13px;
+  }
+
+  .landing-feature-strip {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .landing-dropzone-container .dropzone {
+    padding: 32px 16px;
+  }
+
+  /* Loading track */
+  .ledger-loading-track {
+    width: 180px;
+  }
+
+  /* Auth */
+  .auth-card {
+    padding: 28px 20px 24px;
+  }
+
+  /* Dataset list items */
+  .dataset-list-item {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  /* KPI cards */
+  .kpi-main-val {
+    font-size: 32px;
+  }
+
+  .kpi-stats-grid {
+    max-width: 100%;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  /* Heatmap: scroll horizontally */
+  .heatmap-container {
+    padding: 6px;
+  }
+
+  .heatmap-cell {
+    width: 38px;
+    height: 28px;
+    font-size: 10px;
+  }
+}
+
+/* === Extra-small phones (<400px) === */
+@media (max-width: 399px) {
+  .navbar-brand-text {
+    font-size: 13px;
+  }
+
+  .stat-strip {
+    gap: 8px;
+  }
+
+  .stat {
+    padding: 12px;
+  }
+
+  .tab-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .chat-panel {
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .kpi-main-val {
+    font-size: 28px;
+  }
+}
+
+/* =====================================================================
+   Scrollable Table Wrappers (for narrow screens)
+   ===================================================================== */
+
+/* Column ledger, category review, fix table, date table, preview table
+   all use CSS grid that would get crushed on mobile. The parent container
+   gets overflow-x:auto so they scroll horizontally instead. */
+
+@media (max-width: 1024px) {
+  /* Wrap grid-based tables in a scrollable container */
+  .column-ledger-scroll,
+  .cat-review-table,
+  .fix-individual-table,
+  .preview-value-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -3413,26 +4042,505 @@ optgroup option {
 }
 
 /* =====================================================================
-   Auth Screen
+   Auth Screen — Ambient Data Stream Background & Glassmorphic Card
    ===================================================================== */
 
 .auth-backdrop {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #18181B 0%, #27272A 50%, #1e1b4b 100%);
+  background-color: #09090B;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.07) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(52, 211, 153, 0.05) 0%, transparent 60%);
   padding: 24px;
+  overflow: hidden;
 }
 
+/* --- Container for all 4 ambient layers --- */
+.datastream-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+/* Ambient colored glow orbs in the background */
+.datastream-glow-left {
+  position: absolute;
+  top: 15%;
+  left: 4%;
+  width: 550px;
+  height: 550px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.06) 0%, transparent 70%);
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.datastream-glow-right {
+  position: absolute;
+  top: 35%;
+  right: 6%;
+  width: 650px;
+  height: 650px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.09) 0%, rgba(52, 211, 153, 0.04) 40%, transparent 70%);
+  filter: blur(90px);
+  pointer-events: none;
+}
+
+/* Subtle tech coordinate grid on left side */
+.datastream-tech-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 44%;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at 25% 50%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 25% 50%, black 20%, transparent 75%);
+  opacity: 0.9;
+}
+
+/* =====================================================================
+   Layer 1 — Scrolling Binary Digits (Left third)
+   ===================================================================== */
+.datastream-binary-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3%;
+  width: 30%;
+  max-width: 380px;
+  display: flex;
+  justify-content: space-around;
+  pointer-events: none;
+  opacity: 0.55;
+  filter: blur(0.5px);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.9) 15%, rgba(0, 0, 0, 0.9) 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.9) 15%, rgba(0, 0, 0, 0.9) 82%, transparent 100%);
+}
+
+.datastream-binary-col {
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  width: 18px;
+  text-align: center;
+}
+
+.datastream-binary-track {
+  display: flex;
+  flex-direction: column;
+}
+
+.datastream-binary-text {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  line-height: 24px;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+/* Staggered tints & opacities: ~8-12% faint presence */
+.datastream-col-1 .datastream-digit { color: rgba(52, 211, 153, 0.11); }
+.datastream-col-2 .datastream-digit { color: rgba(139, 92, 246, 0.09); }
+.datastream-col-3 .datastream-digit { color: rgba(52, 211, 153, 0.13); }
+.datastream-col-4 .datastream-digit { color: rgba(139, 92, 246, 0.08); }
+.datastream-col-5 .datastream-digit { color: rgba(52, 211, 153, 0.10); }
+.datastream-col-6 .datastream-digit { color: rgba(139, 92, 246, 0.11); }
+
+/* Accent active bits in the stream */
+.datastream-digit.digit-highlight {
+  color: rgba(52, 211, 153, 0.28);
+  text-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+.datastream-col-2 .datastream-digit.digit-highlight,
+.datastream-col-4 .datastream-digit.digit-highlight {
+  color: rgba(139, 92, 246, 0.26);
+  text-shadow: 0 0 6px rgba(139, 92, 246, 0.4);
+}
+
+/* =====================================================================
+   Layer 3 — Horizontal Scan Lines & Light Beams
+   ===================================================================== */
+.datastream-beams-container {
+  position: absolute;
+  top: 62%;
+  left: 0;
+  width: 100%;
+  height: 80px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.datastream-beam-primary {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(52, 211, 153, 0.08) 12%,
+    rgba(52, 211, 153, 0.45) 40%,
+    rgba(139, 92, 246, 0.75) 70%,
+    rgba(139, 92, 246, 0.2) 90%,
+    transparent 100%
+  );
+  box-shadow: 
+    0 0 10px rgba(52, 211, 153, 0.4),
+    0 0 20px rgba(139, 92, 246, 0.25);
+}
+
+.datastream-beam-glint {
+  position: absolute;
+  top: -1px;
+  width: 160px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), #34D399, transparent);
+  filter: blur(1px);
+}
+
+.datastream-beam-secondary-top {
+  position: absolute;
+  top: 14px;
+  left: 5%;
+  width: 95%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(52, 211, 153, 0.15) 25%,
+    rgba(139, 92, 246, 0.22) 65%,
+    transparent 96%
+  );
+  opacity: 0.6;
+}
+
+.datastream-beam-secondary-bottom {
+  position: absolute;
+  top: 56px;
+  left: 15%;
+  width: 85%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.2) 30%,
+    rgba(52, 211, 153, 0.18) 75%,
+    transparent 96%
+  );
+  opacity: 0.5;
+}
+
+/* Subtle circuit traces branching off beams (matching reference) */
+.datastream-circuit-trace {
+  position: absolute;
+  border-color: rgba(139, 92, 246, 0.2);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.datastream-circuit-1 {
+  top: 14px;
+  right: 8%;
+  width: 180px;
+  height: 24px;
+  border-width: 1px 1px 0 0;
+  border-top-right-radius: 6px;
+}
+
+.datastream-circuit-2 {
+  top: 36px;
+  right: 12%;
+  width: 220px;
+  height: 32px;
+  border-width: 0 1px 1px 0;
+  border-bottom-right-radius: 6px;
+  border-color: rgba(52, 211, 153, 0.2);
+}
+
+/* =====================================================================
+   Layer 2 — Animated Bar-Chart Silhouette (Center-Right)
+   ===================================================================== */
+.datastream-chart-cluster {
+  position: absolute;
+  top: 62%;
+  right: 9%;
+  transform: translateY(-37px); /* Aligns base with primary beam */
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.datastream-bars-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 13px;
+  height: 220px;
+}
+
+.datastream-bar {
+  position: relative;
+  width: 7px;
+  height: var(--bar-h);
+  border-radius: 4px 4px 1px 1px;
+  transform-origin: bottom center;
+}
+
+/* Emerald bars */
+.datastream-bar-emerald {
+  background: linear-gradient(180deg, #34D399 0%, rgba(52, 211, 153, 0.55) 50%, rgba(139, 92, 246, 0.15) 100%);
+  box-shadow: 
+    0 0 12px rgba(52, 211, 153, 0.55),
+    0 0 24px rgba(52, 211, 153, 0.25);
+}
+
+/* Violet bars */
+.datastream-bar-violet {
+  background: linear-gradient(180deg, #A78BFA 0%, rgba(139, 92, 246, 0.6) 50%, rgba(52, 211, 153, 0.15) 100%);
+  box-shadow: 
+    0 0 12px rgba(139, 92, 246, 0.55),
+    0 0 24px rgba(139, 92, 246, 0.25);
+}
+
+/* Bright tip cap on bars */
+.datastream-bar-cap {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  border-radius: 3px;
+  background: #FFFFFF;
+  box-shadow: 0 0 6px #FFFFFF, 0 0 12px currentColor;
+  opacity: 0.95;
+}
+
+/* Mirrored reflection downward across baseline */
+.datastream-bars-reflection {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  opacity: 0.35;
+  filter: blur(1px);
+  margin-top: 2px;
+}
+
+.datastream-bar-mirror {
+  width: 7px;
+  height: var(--bar-h);
+  border-radius: 1px 1px 4px 4px;
+  transform-origin: top center;
+}
+
+.datastream-bar-mirror.datastream-bar-emerald {
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.45) 0%, transparent 100%);
+}
+
+.datastream-bar-mirror.datastream-bar-violet {
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.45) 0%, transparent 100%);
+}
+
+/* =====================================================================
+   Layer 4 — Floating Particles (Center-Right ambient dots)
+   ===================================================================== */
+.datastream-particles-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.datastream-particle {
+  position: absolute;
+  left: var(--p-x);
+  top: var(--p-y);
+  width: var(--p-size);
+  height: var(--p-size);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.datastream-particle-emerald {
+  background: #34D399;
+  box-shadow: 0 0 8px #34D399, 0 0 16px rgba(52, 211, 153, 0.6);
+}
+
+.datastream-particle-violet {
+  background: #8B7CF6;
+  box-shadow: 0 0 8px #8B7CF6, 0 0 16px rgba(139, 92, 246, 0.6);
+}
+
+.datastream-particle-white {
+  background: #FFFFFF;
+  box-shadow: 0 0 6px #FFFFFF, 0 0 12px rgba(52, 211, 153, 0.5);
+}
+
+/* =====================================================================
+   Keyframe Animations (Wrapped for smooth pure-CSS performance)
+   ===================================================================== */
+@keyframes datastreamScroll {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes datastreamBarPulse {
+  0%, 100% {
+    transform: scaleY(1);
+    filter: brightness(1) drop-shadow(0 0 4px rgba(52, 211, 153, 0.3));
+  }
+  50% {
+    transform: scaleY(1.22);
+    filter: brightness(1.28) drop-shadow(0 0 10px rgba(52, 211, 153, 0.6));
+  }
+}
+
+@keyframes datastreamBarMirrorPulse {
+  0%, 100% {
+    transform: scaleY(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scaleY(1.22);
+    opacity: 0.45;
+  }
+}
+
+@keyframes datastreamBeamPulse {
+  0%, 100% {
+    opacity: 0.85;
+    box-shadow: 0 0 10px rgba(52, 211, 153, 0.4), 0 0 20px rgba(139, 92, 246, 0.25);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 16px rgba(52, 211, 153, 0.65), 0 0 32px rgba(139, 92, 246, 0.45);
+  }
+}
+
+@keyframes datastreamGlintRun {
+  0% {
+    left: -180px;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  85% {
+    opacity: 0.9;
+  }
+  100% {
+    left: calc(100% + 180px);
+    opacity: 0;
+  }
+}
+
+@keyframes datastreamParticleDrift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.7);
+    opacity: 0;
+  }
+  20% {
+    opacity: var(--p-op, 0.7);
+  }
+  75% {
+    opacity: var(--p-op, 0.7);
+  }
+  100% {
+    transform: translate3d(var(--p-drift-x, 14px), -80px, 0) scale(1.15);
+    opacity: 0;
+  }
+}
+
+/* Activate animations under prefers-reduced-motion: no-preference */
+@media (prefers-reduced-motion: no-preference) {
+  .datastream-binary-track {
+    animation: datastreamScroll var(--col-dur, 26s) linear infinite;
+    animation-delay: var(--col-delay, 0s);
+    will-change: transform;
+  }
+
+  .datastream-bar {
+    animation: datastreamBarPulse var(--bar-dur, 4s) ease-in-out infinite alternate;
+    animation-delay: var(--bar-delay, 0s);
+    will-change: transform;
+  }
+
+  .datastream-bar-mirror {
+    animation: datastreamBarMirrorPulse var(--bar-dur, 4s) ease-in-out infinite alternate;
+    animation-delay: var(--bar-delay, 0s);
+    will-change: transform;
+  }
+
+  .datastream-beam-primary {
+    animation: datastreamBeamPulse 4.5s ease-in-out infinite alternate;
+  }
+
+  .datastream-beam-glint {
+    animation: datastreamGlintRun 7.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    will-change: left;
+  }
+
+  .datastream-particle {
+    animation: datastreamParticleDrift var(--p-dur, 10s) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    animation-delay: var(--p-delay, 0s);
+    will-change: transform, opacity;
+  }
+}
+
+/* Static fallback for users requesting reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .datastream-binary-track,
+  .datastream-bar,
+  .datastream-bar-mirror,
+  .datastream-beam-primary,
+  .datastream-beam-glint,
+  .datastream-particle {
+    animation: none !important;
+  }
+  .datastream-particle {
+    opacity: 0.3 !important;
+  }
+}
+
+/* =====================================================================
+   Auth Card (Dark Glassmorphic & High Contrast)
+   ===================================================================== */
 .auth-card {
+  position: relative;
+  z-index: 10;
   width: 100%;
   max-width: 420px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: rgba(18, 18, 23, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-lg);
   padding: 40px 36px 36px;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(99, 102, 241, 0.08);
+  box-shadow: 
+    0 25px 60px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(139, 92, 246, 0.15),
+    0 0 45px rgba(139, 92, 246, 0.08);
   animation: authFadeIn 0.5s ease-out;
 }
 
@@ -3456,45 +4564,32 @@ optgroup option {
 }
 
 .auth-logo-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  display: block;
-}
-
-.auth-logo .logo-icon {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6366F1, #8B5CF6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 15px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  border-radius: 8px;
+  display: block;
+  filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.4));
 }
 
 .auth-logo-text {
   font-weight: 800;
-  font-size: 17px;
-  color: var(--ink);
+  font-size: 19px;
+  color: #FAFAFA;
   letter-spacing: -0.02em;
 }
 
 .auth-title {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 22px;
   font-weight: 700;
-  color: var(--ink);
+  color: #F4F4F5;
   text-align: center;
 }
 
 .auth-subtitle {
-  margin: 0 0 28px;
+  margin: 0 0 34px;
   font-size: 14px;
-  color: var(--ink-soft);
+  color: #A1A1AA;
   text-align: center;
   line-height: 1.5;
 }
@@ -3507,72 +4602,83 @@ optgroup option {
 .auth-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--ink);
+  color: #E4E4E7;
   margin-bottom: 6px;
 }
 
 .auth-input {
-  padding: 10px 14px;
-  border: 1px solid var(--line);
+  padding: 11px 14px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
   border-radius: var(--radius-sm);
   font-size: 14px;
   font-family: var(--font-body);
-  color: var(--ink);
-  background: var(--surface);
+  color: #FAFAFA;
+  background: rgba(24, 24, 27, 0.78);
   margin-bottom: 18px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   outline: none;
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08);
 }
 
 .auth-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: rgba(24, 24, 27, 0.95);
+  border-color: #8B7CF6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25), 0 0 12px rgba(139, 92, 246, 0.15);
 }
 
 .auth-input::placeholder {
-  color: #A1A1AA;
+  color: #9CA3AF;
 }
 
 .auth-error {
-  background: var(--flag-soft);
-  color: var(--flag);
+  background: rgba(225, 29, 72, 0.12);
+  color: #FB7185;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 16px;
-  border: 1px solid rgba(225, 29, 72, 0.12);
+  border: 1px solid rgba(225, 29, 72, 0.25);
 }
 
 .auth-success {
-  background: var(--good-soft);
-  color: var(--good);
+  background: rgba(16, 185, 129, 0.12);
+  color: #34D399;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 16px;
-  border: 1px solid rgba(22, 163, 74, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.25);
 }
 
 .auth-submit {
   padding: 12px 20px;
-  background: linear-gradient(135deg, #6366F1, #7C3AED);
-  color: white;
+  background: linear-gradient(135deg, #8B5CF6, #6366F1);
+  color: #FFFFFF;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   font-family: var(--font-body);
   cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 4px;
+  transition: all 0.25s ease;
+  margin-top: 8px;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
 }
 
 .auth-submit:hover:not(:disabled) {
-  background: linear-gradient(135deg, #4F46E5, #6D28D9);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-  transform: translateY(-1px);
+  background: linear-gradient(135deg, #7C3AED, #4F46E5);
+  box-shadow:
+    0 6px 20px rgba(139, 92, 246, 0.5),
+    0 0 30px rgba(139, 92, 246, 0.25),
+    0 0 60px rgba(99, 102, 241, 0.12);
+  transform: translateY(-2px);
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(139, 92, 246, 0.4);
 }
 
 .auth-submit:disabled {
@@ -3584,13 +4690,13 @@ optgroup option {
   text-align: center;
   margin-top: 24px;
   font-size: 14px;
-  color: var(--ink-soft);
+  color: #A1A1AA;
 }
 
 .auth-toggle {
   background: none;
   border: none;
-  color: var(--accent);
+  color: #34D399;
   font-weight: 600;
   font-family: var(--font-body);
   font-size: 14px;
@@ -3598,10 +4704,38 @@ optgroup option {
   padding: 0;
   text-decoration: underline;
   text-underline-offset: 2px;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
 }
 
 .auth-toggle:hover {
-  color: var(--accent-hover);
+  color: #6EE7B7;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.4);
+}
+
+/* Responsive adjustments for login background on mobile/small screens */
+@media (max-width: 768px) {
+  .datastream-binary-zone {
+    width: 45%;
+    opacity: 0.5;
+  }
+  .datastream-col-4,
+  .datastream-col-5,
+  .datastream-col-6 {
+    display: none;
+  }
+  .datastream-chart-cluster {
+    right: 4%;
+    transform: translateY(-37px) scale(0.7);
+    transform-origin: bottom right;
+    opacity: 0.6;
+  }
+  .datastream-circuit-trace {
+    display: none;
+  }
+  .auth-card {
+    padding: 32px 24px 28px;
+    max-width: 100%;
+  }
 }
 
 /* =====================================================================
@@ -3620,6 +4754,9 @@ optgroup option {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .dataset-list-item {
@@ -3632,6 +4769,10 @@ optgroup option {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s ease;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .dataset-list-item:hover {
@@ -3656,6 +4797,7 @@ optgroup option {
 .dataset-list-item-info {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .dataset-list-item-name {
@@ -3674,6 +4816,8 @@ optgroup option {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .dataset-list-item-meta .cleaned-badge {

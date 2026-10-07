@@ -486,6 +486,52 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
     return suggestions
 
 
+_PHONE_COL_KEYWORDS = ("phone", "mobile", "contact")
+
+def _is_phone_column(col_name: str) -> bool:
+    """Return True if the column name suggests it holds phone numbers."""
+    return any(kw in col_name.lower() for kw in _PHONE_COL_KEYWORDS)
+
+
+def _sanitize_phone_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Force every phone column back to dtype=object (string).
+
+    When pandas introduces NaN into an all-integer/string column it silently
+    promotes the column to float64.  This strips any trailing '.0' from values
+    that have been promoted while keeping genuine nulls as real NaN (not the
+    string 'nan').
+    """
+    for col in df.columns:
+        if not _is_phone_column(col):
+            continue
+        # If the column is already object dtype and has no float-contaminated values, skip
+        if df[col].dtype == object:
+            # Still need to strip .0 from any previously-contaminated values
+            mask = df[col].notna()
+            if mask.any():
+                cleaned = df.loc[mask, col].astype(str)
+                # Strip trailing .0 (from float promotion)
+                cleaned = cleaned.str.replace(r'\.0$', '', regex=True)
+                # Turn the literal string "nan" back into real NaN
+                cleaned = cleaned.replace({"nan": pd.NA, "None": pd.NA, "none": pd.NA})
+                df.loc[mask, col] = cleaned
+        else:
+            # Column has been promoted to a numeric dtype — convert back to object
+            new_col = df[col].copy()
+            not_null = new_col.notna()
+            if not_null.any():
+                str_vals = new_col[not_null].astype(str)
+                str_vals = str_vals.str.replace(r'\.0$', '', regex=True)
+                str_vals = str_vals.replace({"nan": pd.NA, "None": pd.NA, "none": pd.NA})
+                # Build a new object-dtype series
+                result = pd.Series(pd.NA, index=df.index, dtype=object)
+                result[not_null] = str_vals
+                df[col] = result
+            else:
+                df[col] = df[col].astype(object)
+    return df
+
+
 def apply_pipeline(
     df: pd.DataFrame, steps: list[Any]
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
@@ -652,6 +698,10 @@ def apply_pipeline(
                         mask = cleaned_df[col].astype(str) == str(key)
                         if mask.any():
                             cleaned_df.loc[mask, col] = new_val
+                # After overrides that may introduce NaN, force phone cols back
+                # to object dtype immediately — don't let float64 propagate.
+                if _is_phone_column(col):
+                    cleaned_df = _sanitize_phone_columns(cleaned_df)
         elif action == "remove_outliers":
             # Non-destructive: add a boolean flag column instead of deleting rows.
             col = params.get("column")
@@ -681,5 +731,9 @@ def apply_pipeline(
             "rows_after": rows_after,
             "rows_affected": rows_affected,
         })
+
+    # Final safety net: ensure phone columns are always clean strings, never
+    # float64 with trailing .0 — regardless of which steps ran.
+    cleaned_df = _sanitize_phone_columns(cleaned_df)
 
     return cleaned_df, log

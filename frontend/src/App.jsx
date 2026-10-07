@@ -25,6 +25,7 @@ import {
 } from "./api";
 import { supabase } from "./supabaseClient";
 import AuthScreen from "./AuthScreen";
+import DataStreamBackground from "./DataStreamBackground";
 import ReactMarkdown from "react-markdown";
 import "./App.css";
 
@@ -2808,6 +2809,9 @@ export default function App() {
   // Steps override — set when chat proposes an action that we want to apply.
   const [chatPendingSteps, setChatPendingSteps] = useState(null);
 
+  // Mobile responsive: hamburger menu state
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Per-column case preference: { [columnName]: "keep" | "upper" | "title" | "lower" }
   const [casePreferences, setCasePreferences] = useState({});
 
@@ -3379,7 +3383,9 @@ export default function App() {
   }
 
   return (
-    <div className={`page${activeTab === "visualize" ? " viz-active" : ""}`}>
+    <div className={`page${activeTab === "visualize" ? " viz-active" : ""}${displayReport ? " has-report-bg" : ""}`}>
+      {/* Subtle ambient background for the report page (scan lines + particles only) */}
+      {displayReport && <DataStreamBackground variant="subtle" className="datastream-report" />}
       {/* --- Top Navbar --- */}
       <nav className="app-navbar">
         <div className="app-navbar-logo">
@@ -3390,23 +3396,38 @@ export default function App() {
           <span className="active-file-pill">{displayReport.filename}</span>
         )}
         <div className="navbar-spacer" />
-        <span className="navbar-user-email">{session.user?.email}</span>
-        {displayReport && (
-          <>
-            <button className="navbar-btn" onClick={resetAll}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              Upload New File
-            </button>
-          </>
-        )}
-        <button className="navbar-btn logout" onClick={handleLogout}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          Log out
+        {/* Hamburger toggle — visible only on mobile via CSS */}
+        <button
+          className="navbar-hamburger"
+          onClick={() => setMobileMenuOpen((v) => !v)}
+          aria-label="Toggle menu"
+        >
+          {mobileMenuOpen ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          )}
         </button>
+        <div className={`navbar-collapsible${mobileMenuOpen ? " open" : ""}`}>
+          <span className="navbar-user-email">{session?.user?.email}</span>
+          {displayReport && (
+            <>
+              <button className="navbar-btn" onClick={() => { resetAll(); setMobileMenuOpen(false); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload New File
+              </button>
+            </>
+          )}
+          <button className="navbar-btn logout" onClick={() => { handleLogout(); setMobileMenuOpen(false); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Log out
+          </button>
+        </div>
       </nav>
 
       {!displayReport ? (
         <div className="landing-hero-container">
+          <DataStreamBackground variant="full" className="datastream-landing" />
           <div className="landing-bg-glow-violet" />
           <div className="landing-bg-glow-emerald" />
           <div className="landing-bg-grid" />
@@ -3564,6 +3585,7 @@ export default function App() {
           <div style={{ display: activeTab === "clean" ? "block" : "none" }}>
 
           <div className="ledger-header">Columns</div>
+          <div className="column-ledger-scroll">
           <div className="column-table-header">
             <span>Column Name</span>
             <span>Type</span>
@@ -3573,6 +3595,7 @@ export default function App() {
           {displayReport.columns?.map((col, idx) => (
             <ColumnRow column={col} index={idx} key={col.name} />
           ))}
+          </div>
 
           {/* --- Cleaning suggestions / manual per-column review section --- */}
           <div className="cleaning-section">

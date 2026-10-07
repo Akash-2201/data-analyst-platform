@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import DataStreamBackground from "./DataStreamBackground";
 
 /**
  * AuthScreen — login / register screen using Supabase auth.
@@ -52,6 +53,7 @@ export default function AuthScreen({ onAuth }) {
 
   return (
     <div className="auth-backdrop">
+      <DataStreamBackground />
       <div className="auth-card">
         <div className="auth-logo">
           <img src="/datalyst-icon.svg" alt="Datalyst" className="auth-logo-icon" />
