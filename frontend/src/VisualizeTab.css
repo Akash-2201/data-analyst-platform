@@ -1,0 +1,319 @@
+/*
+ * VisualizeTab.css — Phase 1
+ * All classes use the rpt- prefix. Zero .viz-* classes touched.
+ */
+
+/* ── Root layout ───────────────────────────────────────────────────────────── */
+.rpt-root {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 60px); /* full viewport minus navbar */
+  background: #18181b; /* zinc-900 — matches existing dark theme */
+  color: #e4e4e7;
+  overflow: hidden;
+}
+
+/* ── Top toolbar ────────────────────────────────────────────────────────────── */
+.rpt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 44px;
+  min-height: 44px;
+  background: #27272a; /* zinc-800 */
+  border-bottom: 1px solid #3f3f46; /* zinc-700 */
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rpt-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rpt-toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a1a1aa; /* zinc-400 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rpt-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rpt-toolbar-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  background: #3f3f46;
+  color: #d4d4d8;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.rpt-toolbar-btn:hover:not(:disabled) {
+  background: #52525b;
+  color: #f4f4f5;
+}
+
+.rpt-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rpt-toolbar-btn--primary {
+  background: #1c6e8c;
+  border-color: #1c6e8c;
+  color: #fff;
+}
+
+.rpt-toolbar-btn--primary:hover:not(:disabled) {
+  background: #1a7fa6;
+  border-color: #1a7fa6;
+}
+
+.rpt-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #3f3f46;
+  margin: 0 4px;
+}
+
+/* ── Canvas area ────────────────────────────────────────────────────────────── */
+.rpt-canvas-area {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #09090b; /* zinc-950 */
+  padding: 24px;
+  min-height: 0;
+}
+
+/* Wrapper that handles CSS-transform scaling in Phase 2.
+   For Phase 1 we just center the fixed-size canvas and let the area scroll. */
+.rpt-canvas-scaler-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* transform-origin: top center; — will be added in Phase 2 */
+}
+
+/* The fixed 1280×720 canvas */
+.rpt-canvas {
+  position: relative;
+  background: #ffffff;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px #3f3f46,
+    0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Subtle dot-grid in edit mode */
+.rpt-canvas-dots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, #d1d5db 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.35;
+  z-index: 0;
+}
+
+/* Empty state centred in canvas */
+.rpt-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #9ca3af; /* gray-400 */
+  pointer-events: none;
+  z-index: 1;
+}
+
+.rpt-canvas-empty-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.rpt-canvas-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.rpt-canvas-empty-hint {
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
+  max-width: 400px;
+  line-height: 1.6;
+}
+
+/* ── Page tabs bar (bottom) ─────────────────────────────────────────────────── */
+.rpt-page-tabs-bar {
+  display: flex;
+  align-items: stretch;
+  height: 38px;
+  min-height: 38px;
+  background: #27272a;
+  border-top: 1px solid #3f3f46;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.rpt-page-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+.rpt-page-tabs::-webkit-scrollbar {
+  height: 3px;
+}
+.rpt-page-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rpt-page-tabs::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 2px;
+}
+
+.rpt-page-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  min-width: 80px;
+  max-width: 180px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #71717a; /* zinc-500 */
+  border-right: 1px solid #3f3f46;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.rpt-page-tab:hover {
+  color: #d4d4d8;
+  background: #3f3f46;
+}
+
+.rpt-page-tab.active {
+  color: #f4f4f5;
+  background: #3f3f46;
+  border-bottom: 2px solid #1c6e8c;
+}
+
+.rpt-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+/* Rename input inside tab */
+.rpt-tab-rename-input {
+  width: 100px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #52525b;
+  border: 1px solid #1c6e8c;
+  border-radius: 3px;
+  color: #f4f4f5;
+  padding: 1px 4px;
+  outline: none;
+}
+
+/* Per-tab action buttons */
+.rpt-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.rpt-tab-action-btn {
+  padding: 1px 4px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #71717a;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1;
+}
+
+.rpt-tab-action-btn:hover {
+  background: #52525b;
+  color: #f4f4f5;
+}
+
+.rpt-tab-action-btn--danger {
+  color: #f87171;
+}
+
+.rpt-tab-action-btn--danger:hover {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+/* + Add page button */
+.rpt-add-page-btn {
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  border-left: 1px solid #3f3f46;
+  color: #71717a;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+
+.rpt-add-page-btn:hover {
+  color: #f4f4f5;
+  background: #3f3f46;
+}
+
+/* ── Responsive: on small screens, let canvas scroll, don't break layout ─────── */
+@media (max-width: 900px) {
+  .rpt-canvas-area {
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 12px;
+  }
+
+  .rpt-toolbar-title {
+    display: none;
+  }
+}
+

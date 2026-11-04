@@ -1,17 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import {
-  BarChart, Bar,
-  LineChart, Line,
-  ScatterChart, Scatter,
-  PieChart, Pie, Cell,
-  AreaChart, Area,
-  Treemap,
-  FunnelChart, Funnel, LabelList,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ReferenceLine,
-} from "recharts";
 import {
   uploadDataset,
   getSuggestions,
@@ -28,6 +17,17 @@ import AuthScreen from "./AuthScreen";
 import DataStreamBackground from "./DataStreamBackground";
 import ReactMarkdown from "react-markdown";
 import "./App.css";
+import {
+  CHART_COLORS,
+  CHART_GALLERY_TYPES,
+  TYPE_ICON_MAP,
+  getTypeInfo,
+  isNumericType,
+  isCategoricalType,
+  ChartPanel,
+  renderSharedChart,
+} from "./ChartComponents";
+import VisualizeTab, { makeInitialReportState } from "./VisualizeTab";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -354,60 +354,19 @@ function ColumnRow({ column, index }) {
 }
 
 // ---------------------------------------------------------------------------
-// Chart colours — a curated palette that works on white
+// Shared chart renderers — moved to ChartComponents.jsx (imported above)
 // ---------------------------------------------------------------------------
-const CHART_COLORS = [
-  "#6366F1", "#38BDF8", "#34D399", "#FBBF24", "#A78BFA",
-  "#F472B6", "#FB923C", "#2DD4BF", "#818CF8", "#F87171",
-];
+// (renderSharedHistogram, renderSharedStackedBar, renderSharedArea, etc.
+//  are all in ChartComponents.jsx — imported as renderSharedChart)
+
+// (renderShared* functions moved to ChartComponents.jsx)
+
+// (CHART_GALLERY_TYPES, all renderShared* functions, renderSharedChart, TYPE_ICON_MAP,
+//  getTypeInfo, isNumericType, isCategoricalType — all moved to ChartComponents.jsx)
 
 // ---------------------------------------------------------------------------
-// Shared chart renderers — used by both ChartBuilder and ChartPanel
+// ChartBuilder — interactive chart section rendered below the profiling report
 // ---------------------------------------------------------------------------
-
-function renderSharedHistogram(chartData) {
-  if (!chartData) return null;
-  const { labels, values, x_label } = chartData;
-  const data = labels.map((l, i) => ({ label: String(l), value: values[i] ?? 0 }));
-  return (
-    <ResponsiveContainer width="100%" height={340}>
-      <BarChart data={data} margin={{ top: 8, right: 24, left: 8, bottom: 72 }} barCategoryGap={1}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--ink-soft)" }} angle={-38} textAnchor="end" interval={0} />
-        <YAxis tick={{ fontSize: 11, fill: "var(--ink-soft)" }} />
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 4 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
-        <Bar dataKey="value" name={x_label} fill="#6366F1" radius={[2, 2, 0, 0]} maxBarSize={60} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-const CHART_GALLERY_TYPES = [
-  // Standard
-  { id: "bar", name: "Bar Chart", icon: "📊", cat: "Standard", desc: "Category comparison" },
-  { id: "line", name: "Line Chart", icon: "📈", cat: "Standard", desc: "Trends over time / sequence" },
-  { id: "scatter", name: "Scatter Plot", icon: "🟣", cat: "Standard", desc: "Correlation between two metrics" },
-  { id: "pie", name: "Pie Chart", icon: "🥧", cat: "Standard", desc: "Proportion of whole" },
-  { id: "histogram", name: "Histogram", icon: "📶", cat: "Standard", desc: "Value frequency distribution" },
-  { id: "box_plot", name: "Box Plot", icon: "📦", cat: "Standard", desc: "Quartiles, medians & outliers" },
-  // Composition & Structure
-  { id: "stacked_bar", name: "Stacked Bar", icon: "🧱", cat: "Composition", desc: "Multi-category segmented totals" },
-  { id: "stacked_bar_100", name: "100% Stacked Bar", icon: "💯", cat: "Composition", desc: "Normalized percentage shares" },
-  { id: "area", name: "Area Chart", icon: "🏔️", cat: "Composition", desc: "Cumulative filled volume trend" },
-  { id: "treemap", name: "Treemap", icon: "🗂️", cat: "Composition", desc: "Hierarchical rectangle size breakdown" },
-  // Flow & Performance
-  { id: "waterfall", name: "Waterfall Chart", icon: "🌊", cat: "Flow & Performance", desc: "Sequential positive/negative impact" },
-  { id: "funnel", name: "Funnel Chart", icon: "⏳", cat: "Flow & Performance", desc: "Sequential stage drop-off" },
-  { id: "heatmap", name: "Correlation Heatmap", icon: "🌡️", cat: "Flow & Performance", desc: "All-numeric correlation matrix (-1 to +1)" },
-  { id: "kpi", name: "KPI / Metric Card", icon: "💎", cat: "Flow & Performance", desc: "Single high-impact stat card" },
-  // Forecasting
-  { id: "forecast_line", name: "Forecast Line", icon: "🔮", cat: "Forecasting", desc: "Linear regression trend projection" },
-  { id: "forecast_ci", name: "Forecast + CI", icon: "🎯", cat: "Forecasting", desc: "Trend with 95% confidence band" },
-  { id: "forecast_actual", name: "Actual vs Forecast", icon: "⚖️", cat: "Forecasting", desc: "Historical fit & R² goodness score" },
-  { id: "forecast_residual", name: "Forecast Residuals", icon: "📉", cat: "Forecasting", desc: "Prediction error variance" },
-  // Spatial
-  { id: "map", name: "Geographic Map", icon: "🗺️", cat: "Spatial", desc: "Latitude & longitude coordinate scatter" },
-];
 
 function renderSharedStackedBar(chartData, is100 = false) {
   if (!chartData || !chartData.series) return null;
