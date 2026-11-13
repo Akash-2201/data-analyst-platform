@@ -645,6 +645,7 @@ export default function VisualizeTab({
         orientation: "landscape",
         unit: "px",
         format: [CANVAS_W, CANVAS_H],
+        hotfixes: ["px_scaling"],
       });
 
       // Step 3: Capture each page sequentially off-screen
