@@ -1,6 +1,6 @@
 /*
- * VisualizeTab.css — Phase 1
- * All classes use the rpt- prefix. Zero .viz-* classes touched.
+ * VisualizeTab.css — Power BI-style Multi-Page Report Canvas
+ * All classes strictly prefixed with rpt- (zero .viz-* touched).
  */
 
 /* ── Root layout ───────────────────────────────────────────────────────────── */
@@ -8,9 +8,10 @@
   display: flex;
   flex-direction: column;
   height: calc(100vh - 60px); /* full viewport minus navbar */
-  background: #18181b; /* zinc-900 — matches existing dark theme */
+  background: #18181b; /* zinc-900 */
   color: #e4e4e7;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Top toolbar ────────────────────────────────────────────────────────────── */
@@ -19,25 +20,26 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  height: 44px;
-  min-height: 44px;
+  height: 46px;
+  min-height: 46px;
   background: #27272a; /* zinc-800 */
   border-bottom: 1px solid #3f3f46; /* zinc-700 */
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .rpt-toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
 .rpt-toolbar-title {
   font-size: 13px;
   font-weight: 600;
-  color: #a1a1aa; /* zinc-400 */
+  color: #a1a1aa;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -46,49 +48,63 @@
 .rpt-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .rpt-toolbar-btn {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
   font-size: 12px;
   font-weight: 500;
   border: 1px solid #3f3f46;
-  border-radius: 5px;
+  border-radius: 6px;
   background: #3f3f46;
-  color: #d4d4d8;
+  color: #e4e4e7;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: all 0.15s ease;
   white-space: nowrap;
 }
 
 .rpt-toolbar-btn:hover:not(:disabled) {
   background: #52525b;
-  color: #f4f4f5;
+  border-color: #71717a;
+  color: #ffffff;
 }
 
 .rpt-toolbar-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .rpt-toolbar-btn--primary {
-  background: #1c6e8c;
-  border-color: #1c6e8c;
-  color: #fff;
+  background: #0284c7; /* sky-600 */
+  border-color: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .rpt-toolbar-btn--primary:hover:not(:disabled) {
-  background: #1a7fa6;
-  border-color: #1a7fa6;
+  background: #0369a1; /* sky-700 */
+  border-color: #0369a1;
 }
 
 .rpt-toolbar-divider {
   width: 1px;
-  height: 20px;
+  height: 22px;
   background: #3f3f46;
   margin: 0 4px;
+}
+
+/* ── Main content area (Canvas + Inspector Sidebar) ─────────────────────────── */
+.rpt-main-area {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 /* ── Canvas area ────────────────────────────────────────────────────────────── */
@@ -99,27 +115,29 @@
   align-items: center;
   justify-content: center;
   background: #09090b; /* zinc-950 */
-  padding: 24px;
+  padding: 20px;
   min-height: 0;
+  position: relative;
 }
 
-/* Wrapper that handles CSS-transform scaling in Phase 2.
-   For Phase 1 we just center the fixed-size canvas and let the area scroll. */
+/* Scaler wrapper: outer container matches the scaled dimensions in document flow */
 .rpt-canvas-scaler-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* transform-origin: top center; — will be added in Phase 2 */
+  flex-shrink: 0;
+  position: relative;
+  transition: width 0.15s ease, height 0.15s ease;
 }
 
-/* The fixed 1280×720 canvas */
+/* Fixed 1280×720 Canvas */
 .rpt-canvas {
   position: relative;
   background: #ffffff;
   border-radius: 4px;
   box-shadow:
-    0 0 0 1px #3f3f46,
-    0 8px 32px rgba(0, 0, 0, 0.6);
+    0 0 0 1px #27272a,
+    0 12px 40px rgba(0, 0, 0, 0.7);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -129,13 +147,13 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: radial-gradient(circle, #d1d5db 1px, transparent 1px);
-  background-size: 24px 24px;
-  opacity: 0.35;
+  background-image: radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px);
+  background-size: 20px 20px;
+  opacity: 0.55;
   z-index: 0;
 }
 
-/* Empty state centred in canvas */
+/* Canvas empty state */
 .rpt-canvas-empty {
   position: absolute;
   inset: 0;
@@ -143,32 +161,457 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: #9ca3af; /* gray-400 */
+  gap: 12px;
+  color: #94a3b8;
   pointer-events: none;
   z-index: 1;
 }
 
 .rpt-canvas-empty-icon {
-  font-size: 48px;
-  opacity: 0.5;
+  font-size: 44px;
+  opacity: 0.6;
 }
 
 .rpt-canvas-empty-title {
   font-size: 18px;
   font-weight: 600;
-  color: #6b7280;
+  color: #64748b;
 }
 
 .rpt-canvas-empty-hint {
   font-size: 13px;
-  color: #9ca3af;
+  color: #94a3b8;
   text-align: center;
-  max-width: 400px;
+  max-width: 420px;
   line-height: 1.6;
 }
 
-/* ── Page tabs bar (bottom) ─────────────────────────────────────────────────── */
+/* ── React-Grid-Layout Tile styling ─────────────────────────────────────────── */
+.rpt-grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+}
+
+.rpt-tile {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.rpt-tile:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.rpt-tile--selected {
+  border: 2px solid #0284c7 !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25), 0 6px 16px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Tile Top Header & Drag Handle */
+.rpt-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  min-height: 26px;
+  cursor: grab;
+  position: relative;
+  z-index: 3;
+}
+
+.rpt-tile-header:active {
+  cursor: grabbing;
+}
+
+.rpt-tile-title-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rpt-tile-kind-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #0284c7;
+  background: #e0f2fe;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.rpt-tile-axis-info {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tile Hover Action Buttons */
+.rpt-tile-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.rpt-tile:hover .rpt-tile-actions,
+.rpt-tile--selected .rpt-tile-actions {
+  opacity: 1;
+}
+
+.rpt-tile-action-btn {
+  padding: 2px 5px;
+  font-size: 11px;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 3px;
+  color: #475569;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.12s ease;
+}
+
+.rpt-tile-action-btn:hover {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.rpt-tile-action-btn--danger:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+/* Tile Body */
+.rpt-tile-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+/* Chart Container inside Tile */
+.rpt-tile-chart-container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Force Recharts ResponsiveContainer to fill tile */
+.rpt-tile-chart-container .recharts-responsive-container {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+}
+
+.rpt-tile-loading,
+.rpt-tile-error,
+.rpt-tile-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  padding: 12px;
+  font-size: 12px;
+  color: #64748b;
+  text-align: center;
+  gap: 8px;
+}
+
+.rpt-tile-error {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* Text Tile Content */
+.rpt-text-tile {
+  width: 100%;
+  height: 100%;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: #1e293b;
+}
+
+.rpt-text-title {
+  font-size: 26px;
+  line-height: 1.25;
+}
+
+.rpt-text-subtitle {
+  font-size: 17px;
+  line-height: 1.35;
+  color: #475569;
+}
+
+.rpt-text-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.rpt-text-tile-input {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #0284c7;
+  border-radius: 4px;
+  padding: 6px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: inherit;
+  color: inherit;
+  background: #f8fafc;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.rpt-text-tile-display {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  word-break: break-word;
+}
+
+.rpt-text-placeholder {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* React-Grid-Layout Placeholder & Handles */
+.rpt-grid .react-grid-placeholder {
+  background: rgba(2, 132, 199, 0.15) !important;
+  border: 2px dashed #0284c7 !important;
+  border-radius: 6px;
+  z-index: 1 !important;
+}
+
+.rpt-grid .react-resizable-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 10;
+}
+
+.rpt-grid .react-resizable-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid #94a3b8;
+  border-bottom: 2px solid #94a3b8;
+}
+
+.rpt-tile:hover .react-resizable-handle::after,
+.rpt-tile--selected .react-resizable-handle::after {
+  border-color: #0284c7;
+}
+
+/* ── Inspector Sidebar (Right side, Power BI format pane) ──────────────────── */
+.rpt-inspector-sidebar {
+  width: 320px;
+  min-width: 320px;
+  background: #27272a; /* zinc-800 */
+  border-left: 1px solid #3f3f46;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 9;
+  flex-shrink: 0;
+}
+
+.rpt-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3f3f46;
+  background: #1f1f23;
+}
+
+.rpt-inspector-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f4f4f5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rpt-inspector-close {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.rpt-inspector-close:hover {
+  color: #ffffff;
+  background: #3f3f46;
+}
+
+.rpt-inspector-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rpt-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rpt-inspector-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a1a1aa;
+}
+
+.rpt-inspector-select,
+.rpt-inspector-input {
+  width: 100%;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #f4f4f5;
+  outline: none;
+  transition: border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+.rpt-inspector-select:focus,
+.rpt-inspector-input:focus {
+  border-color: #0284c7;
+}
+
+.rpt-inspector-btn-group {
+  display: flex;
+  gap: 4px;
+}
+
+.rpt-inspector-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.rpt-inspector-btn:hover {
+  background: #3f3f46;
+  color: #ffffff;
+}
+
+.rpt-inspector-btn.active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Gallery Grid in Sidebar */
+.rpt-inspector-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.rpt-inspector-gallery-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px;
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  color: #d4d4d8;
+  cursor: pointer;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.rpt-inspector-gallery-btn:hover {
+  background: #3f3f46;
+  border-color: #71717a;
+  color: #ffffff;
+}
+
+.rpt-inspector-gallery-btn.active {
+  background: rgba(2, 132, 199, 0.2);
+  border-color: #0284c7;
+  color: #38bdf8;
+}
+
+.rpt-inspector-gallery-icon {
+  font-size: 16px;
+}
+
+.rpt-inspector-gallery-name {
+  font-size: 10px;
+  font-weight: 500;
+  text-align: center;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Page tabs bar (bottom, Power BI-style) ─────────────────────────────────── */
 .rpt-page-tabs-bar {
   display: flex;
   align-items: stretch;
@@ -178,6 +621,7 @@
   border-top: 1px solid #3f3f46;
   flex-shrink: 0;
   overflow: hidden;
+  z-index: 10;
 }
 
 .rpt-page-tabs {
@@ -204,13 +648,13 @@
 .rpt-page-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 12px;
-  min-width: 80px;
+  gap: 6px;
+  padding: 0 14px;
+  min-width: 90px;
   max-width: 180px;
   font-size: 12px;
   font-weight: 500;
-  color: #71717a; /* zinc-500 */
+  color: #a1a1aa;
   border-right: 1px solid #3f3f46;
   cursor: pointer;
   user-select: none;
@@ -221,14 +665,14 @@
 }
 
 .rpt-page-tab:hover {
-  color: #d4d4d8;
+  color: #f4f4f5;
   background: #3f3f46;
 }
 
 .rpt-page-tab.active {
-  color: #f4f4f5;
+  color: #ffffff;
   background: #3f3f46;
-  border-bottom: 2px solid #1c6e8c;
+  border-bottom: 2px solid #0284c7;
 }
 
 .rpt-tab-name {
@@ -237,20 +681,18 @@
   flex: 1;
 }
 
-/* Rename input inside tab */
 .rpt-tab-rename-input {
   width: 100px;
   font-size: 12px;
   font-weight: 500;
-  background: #52525b;
-  border: 1px solid #1c6e8c;
+  background: #18181b;
+  border: 1px solid #0284c7;
   border-radius: 3px;
-  color: #f4f4f5;
-  padding: 1px 4px;
+  color: #ffffff;
+  padding: 2px 4px;
   outline: none;
 }
 
-/* Per-tab action buttons */
 .rpt-tab-actions {
   display: flex;
   align-items: center;
@@ -259,12 +701,12 @@
 }
 
 .rpt-tab-action-btn {
-  padding: 1px 4px;
+  padding: 2px 4px;
   font-size: 11px;
   background: transparent;
   border: none;
   border-radius: 3px;
-  color: #71717a;
+  color: #a1a1aa;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
   line-height: 1;
@@ -272,7 +714,7 @@
 
 .rpt-tab-action-btn:hover {
   background: #52525b;
-  color: #f4f4f5;
+  color: #ffffff;
 }
 
 .rpt-tab-action-btn--danger {
@@ -284,15 +726,14 @@
   color: #fca5a5;
 }
 
-/* + Add page button */
 .rpt-add-page-btn {
-  padding: 0 14px;
+  padding: 0 16px;
   font-size: 12px;
   font-weight: 600;
   background: transparent;
   border: none;
   border-left: 1px solid #3f3f46;
-  color: #71717a;
+  color: #a1a1aa;
   cursor: pointer;
   white-space: nowrap;
   transition: color 0.12s, background 0.12s;
@@ -300,20 +741,117 @@
 }
 
 .rpt-add-page-btn:hover {
-  color: #f4f4f5;
+  color: #ffffff;
   background: #3f3f46;
 }
 
-/* ── Responsive: on small screens, let canvas scroll, don't break layout ─────── */
-@media (max-width: 900px) {
-  .rpt-canvas-area {
-    align-items: flex-start;
-    justify-content: flex-start;
-    padding: 12px;
-  }
+/* ── PDF Export Styles (Off-screen stage + clean capture) ───────────────────── */
+.rpt-export-stage {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 1280px;
+  height: 720px;
+  background: #ffffff;
+  overflow: hidden;
+  z-index: -999;
+}
 
+.rpt-exporting .rpt-canvas-dots {
+  display: none !important;
+}
+
+.rpt-exporting .rpt-tile-header,
+.rpt-exporting .rpt-tile-actions,
+.rpt-exporting .react-resizable-handle {
+  display: none !important;
+}
+
+.rpt-exporting .rpt-tile {
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+.rpt-exporting .rpt-tile--selected {
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+.rpt-pdf-page-footer {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: sans-serif;
+  z-index: 100;
+}
+
+/* ── Export Progress Modal ─────────────────────────────────────────────────── */
+.rpt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+
+.rpt-progress-modal {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  padding: 24px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+  color: #f4f4f5;
+}
+
+.rpt-progress-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rpt-progress-modal-status {
+  font-size: 13px;
+  color: #a1a1aa;
+}
+
+.rpt-progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: #18181b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.rpt-progress-bar-fill {
+  height: 100%;
+  background: #0284c7;
+  transition: width 0.25s ease;
+}
+
+/* ── Responsive safety ──────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
   .rpt-toolbar-title {
     display: none;
   }
-}
 
+  .rpt-inspector-sidebar {
+    position: absolute;
+    right: 0;
+    top: 46px;
+    bottom: 38px;
+    width: 280px;
+    min-width: 280px;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+  }
+}
