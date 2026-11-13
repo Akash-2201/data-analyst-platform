@@ -850,8 +850,40 @@
     right: 0;
     top: 46px;
     bottom: 38px;
-    width: 280px;
+    width: 290px;
+    min-width: 290px;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.6);
+    z-index: 20;
+  }
+}
+
+@media (max-width: 640px) {
+  .rpt-toolbar {
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  .rpt-toolbar-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 3px;
+  }
+
+  .rpt-canvas-area {
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+  }
+
+  .rpt-inspector-sidebar {
+    width: calc(100vw - 20px);
     min-width: 280px;
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+    max-width: 320px;
+  }
+
+  .rpt-page-tab {
+    padding: 0 10px;
+    min-width: 70px;
+    font-size: 11px;
   }
 }
