@@ -316,6 +316,29 @@ export default function VisualizeTab({
     setSelectedTileId(null);
   }, [reportState, setReportState]);
 
+  // ── Keyboard shortcuts: Undo (Ctrl+Z) / Redo (Ctrl+Y or Ctrl+Shift+Z) ────
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't trigger if user is actively typing in an input or textarea
+      const tag = e.target.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        handleUndo();
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "z")
+      ) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
   // ── Canvas auto-scaling ───────────────────────────────────────────────────
   useEffect(() => {
     const updateScale = () => {
