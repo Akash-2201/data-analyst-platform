@@ -13,7 +13,6 @@
 
 import { useRef, useState } from "react";
 import "react-grid-layout/css/styles.css";
-import "react-grid-layout/css/animate.css";
 import "./VisualizeTab.css";
 
 // ---------------------------------------------------------------------------
