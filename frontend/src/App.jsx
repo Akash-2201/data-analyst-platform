@@ -275,6 +275,7 @@ function Dropzone({ onFile, disabled }) {
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) onFile(file);
+          e.target.value = "";
         }}
       />
     </div>

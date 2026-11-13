@@ -1,6 +1,9 @@
 import { supabase } from "./supabaseClient";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8000"
+    : "http://localhost:8000";
 
 /**
  * Get the current session's access token for Authorization headers.
