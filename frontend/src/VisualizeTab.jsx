@@ -745,212 +745,44 @@ export default function VisualizeTab({
 
   return (
     <div className="rpt-root">
-      {/* ── Top Toolbar ── */}
-      <div className="rpt-toolbar">
-        <div className="rpt-toolbar-left">
-          <span className="rpt-toolbar-title">
-            {datasetFilename ? `📊 ${datasetFilename}` : "Report"}
-          </span>
-        </div>
-        <div className="rpt-toolbar-actions">
-          <button className="rpt-toolbar-btn" onClick={handleAddTitle} title="Add title / text box">
-            + Title
-          </button>
-          <button
-            className="rpt-toolbar-btn"
-            onClick={() => handleAddChart("bar")}
-            title="Add chart visual"
-          >
-            + Chart
-          </button>
-          <div className="rpt-toolbar-divider" />
-          <button
-            className="rpt-toolbar-btn"
-            onClick={handleUndo}
-            disabled={!canUndo}
-            title="Undo layout or visual changes"
-          >
-            ↩ Undo
-          </button>
-          <button
-            className="rpt-toolbar-btn"
-            onClick={handleRedo}
-            disabled={!canRedo}
-            title="Redo visual changes"
-          >
-            ↪ Redo
-          </button>
-          <div className="rpt-toolbar-divider" />
-          <button
-            className="rpt-toolbar-btn rpt-toolbar-btn--primary"
-            onClick={handleDownloadReport}
-            disabled={isExporting}
-            title="Export all report pages into a high-res landscape PDF"
-          >
-            {isExporting ? "Exporting…" : "⬇ Download report"}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Main Area: Canvas + Inspector Sidebar ── */}
-      <div className="rpt-main-area">
-        {/* Canvas Area */}
-        <div
-          className="rpt-canvas-area"
-          ref={canvasAreaRef}
-          onClick={() => setSelectedTileId(null)}
-        >
-          <div
-            className="rpt-canvas-scaler-wrapper"
-            style={{
-              width: CANVAS_W * canvasScale,
-              height: CANVAS_H * canvasScale,
-            }}
-          >
-            <div
-              className="rpt-canvas"
-              style={{
-                width: CANVAS_W,
-                height: CANVAS_H,
-                transform: `scale(${canvasScale})`,
-                transformOrigin: "top left",
-              }}
-              data-page-id={activePage?.id}
+      {/* ── Left Side Panel (240px, Power BI-style actions & formatting) ── */}
+      <aside className="rpt-left-panel" onClick={(e) => e.stopPropagation()}>
+        {/* Top: + Chart and + Title buttons */}
+        <div className="rpt-panel-header">
+          <div className="rpt-panel-title">Add Visual</div>
+          <div className="rpt-panel-add-actions">
+            <button
+              className="rpt-panel-btn rpt-panel-btn--primary"
+              onClick={() => handleAddChart("bar")}
+              title="Add chart visual to canvas"
             >
-              {/* Dot Grid */}
-              <div className="rpt-canvas-dots" aria-hidden="true" />
-
-              {/* Empty State */}
-              {activePage && activePage.tiles.length === 0 && (
-                <div className="rpt-canvas-empty">
-                  <div className="rpt-canvas-empty-icon">📐</div>
-                  <div className="rpt-canvas-empty-title">Canvas is empty</div>
-                  <div className="rpt-canvas-empty-hint">
-                    Click <strong>+ Title</strong> or <strong>+ Chart</strong> in the toolbar above to
-                    start designing your dashboard page.
-                  </div>
-                </div>
-              )}
-
-              {/* React-Grid-Layout Canvas */}
-              {activePage && activePage.tiles.length > 0 && (
-                <ReactGridLayout
-                  className="rpt-grid"
-                  layout={currentGridLayout}
-                  cols={GRID_COLS}
-                  rowHeight={GRID_ROW_HEIGHT}
-                  width={CANVAS_W}
-                  margin={GRID_MARGIN}
-                  containerPadding={GRID_CONTAINER_PADDING}
-                  compactType={null}
-                  preventCollision={false}
-                  allowOverlap={true}
-                  isBounded={true}
-                  isDraggable={true}
-                  isResizable={true}
-                  transformScale={canvasScale}
-                  onLayoutChange={handleLayoutChange}
-                  onDragStop={handleDragOrResizeStop}
-                  onResizeStop={handleDragOrResizeStop}
-                  draggableCancel=".rpt-no-drag, .rpt-tile-actions, .rpt-tile-action-btn, input, textarea, select, button"
-                  resizeHandles={["se", "sw", "ne", "nw", "e", "w", "n", "s"]}
-                >
-                  {activePage.tiles.map((tile) => (
-                    <div
-                      key={tile.id}
-                      className={`rpt-tile rpt-tile--${tile.kind}${
-                        selectedTileId === tile.id ? " rpt-tile--selected" : ""
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedTileId(tile.id);
-                      }}
-                    >
-                      {/* Header */}
-                      <div className="rpt-tile-header">
-                        <div className="rpt-tile-title-bar">
-                          <span className="rpt-tile-kind-badge">
-                            {tile.kind === "chart"
-                              ? tile.chartConfig?.chartType?.toUpperCase() || "CHART"
-                              : "TEXT"}
-                          </span>
-                          {tile.kind === "chart" && (
-                            <span className="rpt-tile-axis-info">
-                              {tile.chartConfig?.xCol}
-                              {tile.chartConfig?.yCol ? ` vs ${tile.chartConfig.yCol}` : ""}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Hover Action Toolbar */}
-                        <div
-                          className="rpt-tile-actions rpt-no-drag"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            className="rpt-tile-action-btn rpt-no-drag"
-                            title="Edit visual settings"
-                            onClick={() => setSelectedTileId(tile.id)}
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            className="rpt-tile-action-btn rpt-no-drag"
-                            title="Duplicate visual"
-                            onClick={() => handleDuplicateTile(tile)}
-                          >
-                            ⧉
-                          </button>
-                          <button
-                            className="rpt-tile-action-btn rpt-tile-action-btn--danger rpt-no-drag"
-                            title="Delete visual"
-                            onClick={() => handleDeleteTile(tile.id)}
-                          >
-                            🗑
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Tile Body */}
-                      <div className="rpt-tile-body">
-                        {tile.kind === "chart" ? (
-                          <>
-                            <ChartTileContent tile={tile} datasetId={datasetId} />
-                            <div className="rpt-drag-overlay" />
-                          </>
-                        ) : (
-                          <TextTileContent
-                            tile={tile}
-                            isSelected={selectedTileId === tile.id}
-                            onUpdate={(updates) => handleUpdateTile(tile.id, updates)}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </ReactGridLayout>
-              )}
-            </div>
+              + Chart
+            </button>
+            <button
+              className="rpt-panel-btn"
+              onClick={handleAddTitle}
+              title="Add title / text box to canvas"
+            >
+              + Title
+            </button>
           </div>
         </div>
 
-        {/* ── Right Inspector Sidebar (Power BI Format Pane) ── */}
-        {selectedTile && (
-          <div className="rpt-inspector-sidebar" onClick={(e) => e.stopPropagation()}>
-            <div className="rpt-inspector-header">
-              <span className="rpt-inspector-title">
-                {selectedTile.kind === "chart" ? "📊 Chart Settings" : "📝 Text Settings"}
-              </span>
-              <button
-                className="rpt-inspector-close"
-                onClick={() => setSelectedTileId(null)}
-                title="Close settings"
-              >
-                ✕
-              </button>
-            </div>
+        {/* Below: Visual Formatting Options or Empty State */}
+        <div className="rpt-panel-body">
+          {selectedTile ? (
+            <div className="rpt-inspector-section-wrap">
+              <div className="rpt-panel-section-title">
+                <span>{selectedTile.kind === "chart" ? "📊 Chart Settings" : "📝 Text Settings"}</span>
+                <button
+                  className="rpt-panel-close-btn"
+                  onClick={() => setSelectedTileId(null)}
+                  title="Close settings"
+                >
+                  ✕
+                </button>
+              </div>
 
-            <div className="rpt-inspector-body">
               {/* Chart Visual Settings */}
               {selectedTile.kind === "chart" && activeChartConfig && (
                 <>
@@ -1149,90 +981,277 @@ export default function VisualizeTab({
                 </>
               )}
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Page Tabs (Bottom, Power BI-style) ── */}
-      <div className="rpt-page-tabs-bar">
-        <div className="rpt-page-tabs">
-          {pages.map((page, idx) => (
-            <div
-              key={page.id}
-              className={`rpt-page-tab${page.id === activePageId ? " active" : ""}`}
-              draggable
-              onDragStart={() => handleTabDragStart(idx)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => handleTabDrop(idx)}
-              onClick={() => {
-                setReportState((prev) => ({ ...prev, activePageId: page.id }));
-                setSelectedTileId(null);
-              }}
-              onDoubleClick={() => handleStartRename(page)}
-              title="Double-click to rename · Drag to reorder"
-            >
-              {renamingPageId === page.id ? (
-                <input
-                  className="rpt-tab-rename-input"
-                  value={renameValue}
-                  autoFocus
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={handleCommitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCommitRename();
-                    if (e.key === "Escape") setRenamingPageId(null);
-                  }}
-                />
-              ) : (
-                <span className="rpt-tab-name">{page.name}</span>
-              )}
-
-              {page.id === activePageId && (
-                <div className="rpt-tab-actions" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="rpt-tab-action-btn"
-                    title="Duplicate page"
-                    onClick={() => handleDuplicatePage(page)}
-                  >
-                    ⧉
-                  </button>
-                  {pages.length > 1 &&
-                    (deleteConfirmId === page.id ? (
-                      <>
-                        <button
-                          className="rpt-tab-action-btn rpt-tab-action-btn--danger"
-                          title="Confirm delete"
-                          onClick={() => handleDeletePage(page.id)}
-                        >
-                          ✓
-                        </button>
-                        <button
-                          className="rpt-tab-action-btn"
-                          title="Cancel"
-                          onClick={() => setDeleteConfirmId(null)}
-                        >
-                          ✕
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="rpt-tab-action-btn"
-                        title="Delete page"
-                        onClick={() => setDeleteConfirmId(page.id)}
-                      >
-                        🗑
-                      </button>
-                    ))}
-                </div>
-              )}
+          ) : (
+            <div className="rpt-panel-empty-hint">
+              <div className="rpt-panel-empty-icon">🎨</div>
+              <div className="rpt-panel-empty-text">Select a visual to format</div>
+              <div className="rpt-panel-empty-sub">
+                Click any visual on the canvas to configure its chart type, data columns, or typography.
+              </div>
             </div>
-          ))}
+          )}
+        </div>
+      </aside>
+
+      {/* ── Center Column: Toolbar, Canvas, Bottom Tabs ── */}
+      <div className="rpt-center-col">
+        {/* Top Toolbar (ONLY title/filename, Undo, Redo, Download report) */}
+        <div className="rpt-toolbar">
+          <div className="rpt-toolbar-left">
+            <span className="rpt-toolbar-title">
+              {datasetFilename ? `📊 ${datasetFilename}` : "Report"}
+            </span>
+          </div>
+          <div className="rpt-toolbar-actions">
+            <button
+              className="rpt-toolbar-btn"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              title="Undo layout or visual changes"
+            >
+              ↩ Undo
+            </button>
+            <button
+              className="rpt-toolbar-btn"
+              onClick={handleRedo}
+              disabled={!canRedo}
+              title="Redo visual changes"
+            >
+              ↪ Redo
+            </button>
+            <div className="rpt-toolbar-divider" />
+            <button
+              className="rpt-toolbar-btn rpt-toolbar-btn--primary"
+              onClick={handleDownloadReport}
+              disabled={isExporting}
+              title="Export all report pages into a high-res landscape PDF"
+            >
+              {isExporting ? "Exporting…" : "⬇ Download report"}
+            </button>
+          </div>
         </div>
 
-        <button className="rpt-add-page-btn" onClick={handleAddPage} title="Add a new blank page">
-          + Add page
-        </button>
+        {/* Canvas Area (contains ONLY the canvas) */}
+        <div
+          className="rpt-canvas-area"
+          ref={canvasAreaRef}
+          onClick={() => setSelectedTileId(null)}
+        >
+          <div
+            className="rpt-canvas-scaler-wrapper"
+            style={{
+              width: CANVAS_W * canvasScale,
+              height: CANVAS_H * canvasScale,
+            }}
+          >
+            <div
+              className="rpt-canvas"
+              style={{
+                width: CANVAS_W,
+                height: CANVAS_H,
+                transform: `scale(${canvasScale})`,
+                transformOrigin: "top left",
+              }}
+              data-page-id={activePage?.id}
+            >
+              {/* Dot Grid */}
+              <div className="rpt-canvas-dots" aria-hidden="true" />
+
+              {/* Empty State */}
+              {activePage && activePage.tiles.length === 0 && (
+                <div className="rpt-canvas-empty">
+                  <div className="rpt-canvas-empty-icon">📐</div>
+                  <div className="rpt-canvas-empty-title">Canvas is empty</div>
+                  <div className="rpt-canvas-empty-hint">
+                    Click <strong>+ Chart</strong> or <strong>+ Title</strong> in the left panel to
+                    start designing your dashboard page.
+                  </div>
+                </div>
+              )}
+
+              {/* React-Grid-Layout Canvas */}
+              {activePage && activePage.tiles.length > 0 && (
+                <ReactGridLayout
+                  className="rpt-grid"
+                  layout={currentGridLayout}
+                  cols={GRID_COLS}
+                  rowHeight={GRID_ROW_HEIGHT}
+                  width={CANVAS_W}
+                  margin={GRID_MARGIN}
+                  containerPadding={GRID_CONTAINER_PADDING}
+                  compactType={null}
+                  preventCollision={false}
+                  allowOverlap={true}
+                  isBounded={true}
+                  isDraggable={true}
+                  isResizable={true}
+                  transformScale={canvasScale}
+                  onLayoutChange={handleLayoutChange}
+                  onDragStop={handleDragOrResizeStop}
+                  onResizeStop={handleDragOrResizeStop}
+                  draggableCancel=".rpt-no-drag, .rpt-tile-actions, .rpt-tile-action-btn, input, textarea, select, button"
+                  resizeHandles={["se", "sw", "ne", "nw", "e", "w", "n", "s"]}
+                >
+                  {activePage.tiles.map((tile) => (
+                    <div
+                      key={tile.id}
+                      className={`rpt-tile rpt-tile--${tile.kind}${
+                        selectedTileId === tile.id ? " rpt-tile--selected" : ""
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedTileId(tile.id);
+                      }}
+                    >
+                      {/* Header */}
+                      <div className="rpt-tile-header">
+                        <div className="rpt-tile-title-bar">
+                          <span className="rpt-tile-kind-badge">
+                            {tile.kind === "chart"
+                              ? tile.chartConfig?.chartType?.toUpperCase() || "CHART"
+                              : "TEXT"}
+                          </span>
+                          {tile.kind === "chart" && (
+                            <span className="rpt-tile-axis-info">
+                              {tile.chartConfig?.xCol}
+                              {tile.chartConfig?.yCol ? ` vs ${tile.chartConfig.yCol}` : ""}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Hover Action Toolbar */}
+                        <div
+                          className="rpt-tile-actions rpt-no-drag"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            className="rpt-tile-action-btn rpt-no-drag"
+                            title="Edit visual settings"
+                            onClick={() => setSelectedTileId(tile.id)}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="rpt-tile-action-btn rpt-no-drag"
+                            title="Duplicate visual"
+                            onClick={() => handleDuplicateTile(tile)}
+                          >
+                            ⧉
+                          </button>
+                          <button
+                            className="rpt-tile-action-btn rpt-tile-action-btn--danger rpt-no-drag"
+                            title="Delete visual"
+                            onClick={() => handleDeleteTile(tile.id)}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Tile Body */}
+                      <div className="rpt-tile-body">
+                        {tile.kind === "chart" ? (
+                          <>
+                            <ChartTileContent tile={tile} datasetId={datasetId} />
+                            <div className="rpt-drag-overlay" />
+                          </>
+                        ) : (
+                          <TextTileContent
+                            tile={tile}
+                            isSelected={selectedTileId === tile.id}
+                            onUpdate={(updates) => handleUpdateTile(tile.id, updates)}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </ReactGridLayout>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Page Tabs (Bottom, Power BI-style) ── */}
+        <div className="rpt-page-tabs-bar">
+          <div className="rpt-page-tabs">
+            {pages.map((page, idx) => (
+              <div
+                key={page.id}
+                className={`rpt-page-tab${page.id === activePageId ? " active" : ""}`}
+                draggable
+                onDragStart={() => handleTabDragStart(idx)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleTabDrop(idx)}
+                onClick={() => {
+                  setReportState((prev) => ({ ...prev, activePageId: page.id }));
+                  setSelectedTileId(null);
+                }}
+                onDoubleClick={() => handleStartRename(page)}
+                title="Double-click to rename · Drag to reorder"
+              >
+                {renamingPageId === page.id ? (
+                  <input
+                    className="rpt-tab-rename-input"
+                    value={renameValue}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={handleCommitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCommitRename();
+                      if (e.key === "Escape") setRenamingPageId(null);
+                    }}
+                  />
+                ) : (
+                  <span className="rpt-tab-name">{page.name}</span>
+                )}
+
+                {page.id === activePageId && (
+                  <div className="rpt-tab-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="rpt-tab-action-btn"
+                      title="Duplicate page"
+                      onClick={() => handleDuplicatePage(page)}
+                    >
+                      ⧉
+                    </button>
+                    {pages.length > 1 &&
+                      (deleteConfirmId === page.id ? (
+                        <>
+                          <button
+                            className="rpt-tab-action-btn rpt-tab-action-btn--danger"
+                            title="Confirm delete"
+                            onClick={() => handleDeletePage(page.id)}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            className="rpt-tab-action-btn"
+                            title="Cancel"
+                            onClick={() => setDeleteConfirmId(null)}
+                          >
+                            ✕
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="rpt-tab-action-btn"
+                          title="Delete page"
+                          onClick={() => setDeleteConfirmId(page.id)}
+                        >
+                          🗑
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button className="rpt-add-page-btn" onClick={handleAddPage} title="Add a new blank page">
+            + Add page
+          </button>
+        </div>
       </div>
 
       {/* ── Off-screen PDF Export Render Stage ── */}

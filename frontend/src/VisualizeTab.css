@@ -6,10 +6,21 @@
 /* ── Root layout ───────────────────────────────────────────────────────────── */
 .rpt-root {
   display: flex;
-  flex-direction: column;
+  flex-direction: row; /* Horizontal layout: Left Panel (240px) + Center Column */
   height: calc(100vh - 60px); /* full viewport minus navbar */
   background: #18181b; /* zinc-900 */
   color: #e4e4e7;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Center Column: Top Toolbar, Canvas, Bottom Tabs ────────────────────────── */
+.rpt-center-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   overflow: hidden;
   position: relative;
 }
@@ -548,59 +559,146 @@
   cursor: n-resize;
 }
 
-/* ── Inspector Sidebar (Right side, Power BI format pane) ──────────────────── */
-.rpt-inspector-sidebar {
-  width: 320px;
-  min-width: 320px;
-  background: #27272a; /* zinc-800 */
-  border-left: 1px solid #3f3f46;
+/* ── Left Side Panel (240px wide, Power BI-style actions & formatting) ───────── */
+.rpt-left-panel {
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  background: #202024;
+  border-right: 1px solid #3f3f46;
   display: flex;
   flex-direction: column;
+  height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  z-index: 9;
+  flex-shrink: 0;
+  z-index: 15;
+}
+
+.rpt-panel-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #3f3f46;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #18181b;
   flex-shrink: 0;
 }
 
-.rpt-inspector-header {
+.rpt-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #a1a1aa;
+}
+
+.rpt-panel-add-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rpt-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  background: #27272a;
+  color: #f4f4f5;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.rpt-panel-btn:hover {
+  background: #3f3f46;
+  border-color: #52525b;
+}
+
+.rpt-panel-btn--primary {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+}
+
+.rpt-panel-btn--primary:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+.rpt-panel-body {
+  padding: 12px 14px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.rpt-inspector-section-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rpt-panel-section-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #3f3f46;
-  background: #1f1f23;
-}
-
-.rpt-inspector-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: #f4f4f5;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #3f3f46;
 }
 
-.rpt-inspector-close {
+.rpt-panel-close-btn {
   background: transparent;
   border: none;
   color: #a1a1aa;
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 4px;
+  font-size: 14px;
+  padding: 2px 6px;
   border-radius: 4px;
 }
 
-.rpt-inspector-close:hover {
+.rpt-panel-close-btn:hover {
   color: #ffffff;
   background: #3f3f46;
 }
 
-.rpt-inspector-body {
-  padding: 16px;
+.rpt-panel-empty-hint {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 8px;
+  color: #71717a;
+  gap: 10px;
+}
+
+.rpt-panel-empty-icon {
+  font-size: 28px;
+  opacity: 0.7;
+}
+
+.rpt-panel-empty-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a1a1aa;
+}
+
+.rpt-panel-empty-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #71717a;
 }
 
 .rpt-inspector-section {
@@ -667,14 +765,14 @@
   font-weight: 600;
 }
 
-/* Gallery Grid in Sidebar */
+/* Gallery Grid in Left Panel */
 .rpt-inspector-gallery-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: 4px;
   max-height: 220px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
 .rpt-inspector-gallery-btn {
@@ -682,13 +780,13 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8px 4px;
+  padding: 6px 2px;
   background: #18181b;
   border: 1px solid #3f3f46;
-  border-radius: 6px;
+  border-radius: 5px;
   color: #d4d4d8;
   cursor: pointer;
-  gap: 4px;
+  gap: 3px;
   transition: all 0.15s ease;
 }
 
@@ -953,16 +1051,21 @@
   .rpt-toolbar-title {
     display: none;
   }
+}
 
-  .rpt-inspector-sidebar {
-    position: absolute;
-    right: 0;
-    top: 46px;
-    bottom: 38px;
-    width: 290px;
-    min-width: 290px;
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.6);
-    z-index: 20;
+@media (max-width: 768px) {
+  .rpt-root {
+    flex-direction: column;
+  }
+
+  .rpt-left-panel {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 1px solid #3f3f46;
   }
 }
 
@@ -982,12 +1085,6 @@
     padding: 10px;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x pan-y;
-  }
-
-  .rpt-inspector-sidebar {
-    width: calc(100vw - 20px);
-    min-width: 280px;
-    max-width: 320px;
   }
 
   .rpt-page-tab {
