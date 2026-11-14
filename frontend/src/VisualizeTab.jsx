@@ -20,6 +20,7 @@ import ReactGridLayout from "react-grid-layout";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 import "./VisualizeTab.css";
 import { getChartData } from "./api";
 import {
@@ -32,9 +33,10 @@ import {
 // ---------------------------------------------------------------------------
 export const CANVAS_W = 1280;
 export const CANVAS_H = 720;
-export const GRID_COLS = 24;
-export const GRID_ROW_HEIGHT = 22; // 24 * (22 + 8) + 8 = 728px ~ 720px
-export const GRID_MARGIN = [8, 8];
+export const GRID_COLS = 48;
+export const GRID_ROW_HEIGHT = 15; // 48 cols & 15px rows give fine grid placement
+export const GRID_MARGIN = [4, 4];
+export const GRID_CONTAINER_PADDING = [0, 0];
 
 // ---------------------------------------------------------------------------
 // State Factory Helpers
@@ -57,6 +59,26 @@ export function makeInitialReportState() {
     activePageId: firstPage.id,
     pages: [firstPage],
   };
+}
+
+export function findFirstFreeSpot(tiles = [], w = 12, h = 14, maxCols = GRID_COLS, maxRows = 44) {
+  const overlaps = (x, y, w, h, t) => {
+    const tx = t.layout?.x ?? 0;
+    const ty = t.layout?.y ?? 0;
+    const tw = t.layout?.w ?? 12;
+    const th = t.layout?.h ?? 14;
+    return x < tx + tw && x + w > tx && y < ty + th && y + h > ty;
+  };
+
+  for (let y = 0; y <= maxRows - h; y += 2) {
+    for (let x = 0; x <= maxCols - w; x += 2) {
+      const collides = tiles.some((t) => overlaps(x, y, w, h, t));
+      if (!collides) {
+        return { x, y };
+      }
+    }
+  }
+  return { x: 0, y: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -459,10 +481,13 @@ export default function VisualizeTab({
   // ── Tile operations ───────────────────────────────────────────────────────
   const handleAddTitle = () => {
     pushHistory();
+    const w = 24;
+    const h = 3;
+    const spot = findFirstFreeSpot(activePage.tiles, w, h);
     const newTile = {
       id: makeTileId("text"),
       kind: "text",
-      layout: { x: 0, y: 0, w: 12, h: 2, minW: 3, minH: 1 },
+      layout: { x: spot.x, y: spot.y, w, h, minW: 6, minH: 2 },
       text: "Dashboard Title",
       fontSize: "title",
       align: "left",
@@ -476,10 +501,9 @@ export default function VisualizeTab({
 
   const handleAddChart = (chartType = "bar") => {
     pushHistory();
-    const maxY = activePage.tiles.reduce(
-      (max, t) => Math.max(max, (t.layout?.y || 0) + (t.layout?.h || 0)),
-      0
-    );
+    const w = 12;
+    const h = 14;
+    const spot = findFirstFreeSpot(activePage.tiles, w, h);
 
     const defaultX = allCols[0]?.name || "";
     const defaultY = allCols.length > 1 ? allCols[1]?.name : allCols[0]?.name || "";
@@ -489,12 +513,12 @@ export default function VisualizeTab({
       id: makeTileId("chart"),
       kind: "chart",
       layout: {
-        x: 0,
-        y: Math.min(maxY, 14),
-        w: 12,
-        h: 10,
+        x: spot.x,
+        y: spot.y,
+        w,
+        h,
         minW: 6,
-        minH: 5,
+        minH: 6,
       },
       chartConfig: {
         chartType,
@@ -513,13 +537,17 @@ export default function VisualizeTab({
 
   const handleDuplicateTile = (tile) => {
     pushHistory();
+    const w = tile.layout?.w ?? 12;
+    const h = tile.layout?.h ?? 14;
+    const newX = Math.min((tile.layout?.x ?? 0) + 2, GRID_COLS - w);
+    const newY = Math.min((tile.layout?.y ?? 0) + 2, 44 - h);
     const copy = {
       ...JSON.parse(JSON.stringify(tile)),
       id: makeTileId(tile.kind),
       layout: {
         ...tile.layout,
-        x: Math.min(tile.layout.x + 1, GRID_COLS - tile.layout.w),
-        y: Math.min(tile.layout.y + 1, 14),
+        x: Math.max(0, newX),
+        y: Math.max(0, newY),
       },
     };
     setPages((prev) =>
@@ -611,7 +639,7 @@ export default function VisualizeTab({
       x: t.layout?.x ?? 0,
       y: t.layout?.y ?? 0,
       w: t.layout?.w ?? 12,
-      h: t.layout?.h ?? 10,
+      h: t.layout?.h ?? 14,
       minW: t.layout?.minW ?? 3,
       minH: t.layout?.minH ?? 2,
     }));
@@ -813,17 +841,19 @@ export default function VisualizeTab({
                   rowHeight={GRID_ROW_HEIGHT}
                   width={CANVAS_W}
                   margin={GRID_MARGIN}
-                  containerPadding={GRID_MARGIN}
+                  containerPadding={GRID_CONTAINER_PADDING}
                   compactType={null}
-                  preventCollision={true}
+                  preventCollision={false}
+                  allowOverlap={true}
                   isBounded={true}
+                  isDraggable={true}
+                  isResizable={true}
                   transformScale={canvasScale}
                   onLayoutChange={handleLayoutChange}
                   onDragStop={handleDragOrResizeStop}
                   onResizeStop={handleDragOrResizeStop}
-                  draggableHandle=".rpt-tile-drag-handle"
-                  draggableCancel=".rpt-tile-no-drag"
-                  resizeHandles={["s", "w", "e", "n", "sw", "nw", "se", "ne"]}
+                  draggableCancel=".rpt-no-drag, .rpt-tile-actions, .rpt-tile-action-btn, input, textarea, select, button"
+                  resizeHandles={["se", "sw", "ne", "nw", "e", "w", "n", "s"]}
                 >
                   {activePage.tiles.map((tile) => (
                     <div
@@ -836,8 +866,8 @@ export default function VisualizeTab({
                         setSelectedTileId(tile.id);
                       }}
                     >
-                      {/* Header & Drag Handle */}
-                      <div className="rpt-tile-header rpt-tile-drag-handle">
+                      {/* Header */}
+                      <div className="rpt-tile-header">
                         <div className="rpt-tile-title-bar">
                           <span className="rpt-tile-kind-badge">
                             {tile.kind === "chart"
@@ -854,25 +884,25 @@ export default function VisualizeTab({
 
                         {/* Hover Action Toolbar */}
                         <div
-                          className="rpt-tile-actions rpt-tile-no-drag"
+                          className="rpt-tile-actions rpt-no-drag"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
-                            className="rpt-tile-action-btn"
+                            className="rpt-tile-action-btn rpt-no-drag"
                             title="Edit visual settings"
                             onClick={() => setSelectedTileId(tile.id)}
                           >
                             ✏️
                           </button>
                           <button
-                            className="rpt-tile-action-btn"
+                            className="rpt-tile-action-btn rpt-no-drag"
                             title="Duplicate visual"
                             onClick={() => handleDuplicateTile(tile)}
                           >
                             ⧉
                           </button>
                           <button
-                            className="rpt-tile-action-btn rpt-tile-action-btn--danger"
+                            className="rpt-tile-action-btn rpt-tile-action-btn--danger rpt-no-drag"
                             title="Delete visual"
                             onClick={() => handleDeleteTile(tile.id)}
                           >
@@ -884,7 +914,10 @@ export default function VisualizeTab({
                       {/* Tile Body */}
                       <div className="rpt-tile-body">
                         {tile.kind === "chart" ? (
-                          <ChartTileContent tile={tile} datasetId={datasetId} />
+                          <>
+                            <ChartTileContent tile={tile} datasetId={datasetId} />
+                            <div className="rpt-drag-overlay" />
+                          </>
                         ) : (
                           <TextTileContent
                             tile={tile}
@@ -1217,14 +1250,16 @@ export default function VisualizeTab({
               x: t.layout?.x ?? 0,
               y: t.layout?.y ?? 0,
               w: t.layout?.w ?? 12,
-              h: t.layout?.h ?? 10,
+              h: t.layout?.h ?? 14,
             }))}
             cols={GRID_COLS}
             rowHeight={GRID_ROW_HEIGHT}
             width={CANVAS_W}
             margin={GRID_MARGIN}
-            containerPadding={GRID_MARGIN}
+            containerPadding={GRID_CONTAINER_PADDING}
             compactType={null}
+            preventCollision={false}
+            allowOverlap={true}
             isDraggable={false}
             isResizable={false}
           >
