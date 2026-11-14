@@ -2541,6 +2541,7 @@ export default function App() {
               datasetId={displayReport.dataset_id}
               columns={displayReport.columns || []}
               datasetFilename={displayReport.filename}
+              userId={session?.user?.id || "default"}
             />
           </div>
         </div>

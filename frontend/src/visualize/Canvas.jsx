@@ -1,0 +1,245 @@
+/**
+ * frontend/src/visualize/Canvas.jsx
+ * 1280x720 logical canvas with CSS transform scaling and ReactGridLayout.
+ */
+
+import React, { useRef, useState, useEffect, useMemo, useCallback } from "react";
+import ReactGridLayout from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import { useDashboard } from "./dashboardContext";
+import { CANVAS_W, CANVAS_H } from "./constants";
+import {
+  getGridCell,
+  tileToRglLayout,
+  rglLayoutToTilePx,
+} from "./utils";
+
+export function Canvas({
+  datasetId,
+  columns = [],
+  renderTileContent,
+  canvasRef,
+}) {
+  const { state, dispatch } = useDashboard();
+  const { present } = state;
+  const { activePageId, pages, mode, settings, selectedTileIds } = present;
+  const { snap, showGrid } = settings;
+
+  const viewportRef = useRef(null);
+  const [scale, setScale] = useState(1);
+
+  const activePage = useMemo(() => {
+    return pages.find((p) => p.id === activePageId) || pages[0];
+  }, [pages, activePageId]);
+
+  const tiles = activePage?.tiles || [];
+
+  // Compute transform scale to fit container width & height maintaining 16:9
+  const updateScale = useCallback(() => {
+    if (!viewportRef.current) return;
+    const { clientWidth, clientHeight } = viewportRef.current;
+    if (clientWidth <= 0 || clientHeight <= 0) return;
+    const pad = 32;
+    const availW = Math.max(100, clientWidth - pad);
+    const availH = Math.max(100, clientHeight - pad);
+    const scaleW = availW / CANVAS_W;
+    const scaleH = availH / CANVAS_H;
+    const newScale = Math.min(scaleW, scaleH, 1.25);
+    setScale(Math.max(0.2, newScale));
+  }, []);
+
+  useEffect(() => {
+    updateScale();
+    const handleResize = () => updateScale();
+    window.addEventListener("resize", handleResize);
+    let ro;
+    if (viewportRef.current && window.ResizeObserver) {
+      ro = new ResizeObserver(updateScale);
+      ro.observe(viewportRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (ro) ro.disconnect();
+    };
+  }, [updateScale]);
+
+  // Grid columns and cell size based on snap setting
+  const cell = getGridCell(snap);
+  const cols = Math.round(CANVAS_W / cell);
+
+  // Generate RGL layout items
+  const rglLayout = useMemo(() => {
+    return tiles.map((t) => tileToRglLayout(t, snap));
+  }, [tiles, snap]);
+
+  // Handle Drag / Resize Stop -> dispatch layout update (only one history record per gesture!)
+  const handleDragOrResizeStop = (newLayout, oldItem, newItem) => {
+    if (!newItem) return;
+    const px = rglLayoutToTilePx(newItem, snap);
+    dispatch({
+      type: "UPDATE_TILE_LAYOUT",
+      payload: {
+        tileId: newItem.i,
+        x: px.x,
+        y: px.y,
+        w: px.w,
+        h: px.h,
+      },
+    });
+  };
+
+  const handleTileClick = (e, tileId) => {
+    e.stopPropagation();
+    if (mode === "edit") {
+      dispatch({
+        type: "SELECT_TILE",
+        payload: { tileId, multi: e.shiftKey || e.ctrlKey || e.metaKey },
+      });
+    }
+  };
+
+  const handleCanvasClick = (e) => {
+    if (mode === "edit") {
+      dispatch({ type: "CLEAR_SELECTION" });
+    }
+  };
+
+  return (
+    <div
+      ref={viewportRef}
+      className={`rpt-canvas-viewport ${showGrid ? "grid-dots" : ""}`}
+      onClick={handleCanvasClick}
+    >
+      <div
+        ref={canvasRef}
+        className="rpt-canvas-wrapper"
+        style={{
+          width: CANVAS_W,
+          height: CANVAS_H,
+          transform: `scale(${scale})`,
+          transformOrigin: "center center",
+          position: "relative",
+        }}
+      >
+        <ReactGridLayout
+          className="layout"
+          layout={rglLayout}
+          cols={cols}
+          rowHeight={cell}
+          width={CANVAS_W}
+          margin={[0, 0]}
+          containerPadding={[0, 0]}
+          compactType={null}
+          allowOverlap={true}
+          preventCollision={false}
+          isBounded={false}
+          isDraggable={mode === "edit"}
+          isResizable={mode === "edit"}
+          transformScale={scale}
+          draggableCancel=".rpt-no-drag, .rpt-tile-hover-bar, button, input, select, textarea"
+          resizeHandles={["se", "sw", "ne", "nw", "e", "w", "n", "s"]}
+          onDragStop={handleDragOrResizeStop}
+          onResizeStop={handleDragOrResizeStop}
+        >
+          {tiles.map((tile) => {
+            const isSelected = selectedTileIds.includes(tile.id);
+            return (
+              <div
+                key={tile.id}
+                className={`rpt-tile ${isSelected ? "selected" : ""}`}
+                style={{
+                  backgroundColor: tile.format?.bg || "#18181b",
+                  border: tile.format?.border ? `1px solid ${tile.format.borderColor || "#27272a"}` : "none",
+                  borderRadius: tile.format?.radius ?? 8,
+                  zIndex: tile.z || 1,
+                }}
+                onClick={(e) => handleTileClick(e, tile.id)}
+              >
+                {/* Tile Header */}
+                {tile.format?.showTitle !== false && (
+                  <div className="rpt-tile-header">
+                    <span
+                      className="rpt-tile-title"
+                      style={{
+                        textAlign: tile.format?.titleAlign || "left",
+                        fontSize: tile.format?.fontSize || 13,
+                      }}
+                    >
+                      {tile.title}
+                    </span>
+                  </div>
+                )}
+
+                {/* Hover Mini Toolbar (in edit mode) */}
+                {mode === "edit" && (
+                  <div className="rpt-tile-hover-bar rpt-no-drag">
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn"
+                      title="Duplicate (Ctrl+D)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "DUPLICATE_TILES", payload: { tileIds: [tile.id] } });
+                      }}
+                    >
+                      📋
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn"
+                      title="Bring to Front"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "BRING_TO_FRONT", payload: { tileId: tile.id } });
+                      }}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn"
+                      title="Send to Back"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "SEND_TO_BACK", payload: { tileId: tile.id } });
+                      }}
+                    >
+                      ▼
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn danger"
+                      title="Delete (Del)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "DELETE_TILES", payload: { tileIds: [tile.id] } });
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* Tile Body */}
+                <div className="rpt-tile-body">
+                  {/* Transparent overlay in Edit mode so Recharts cannot swallow mouse events */}
+                  {mode === "edit" && <div className="rpt-drag-overlay" />}
+
+                  {/* Render content: charts, tables, KPIs, slicers, or text */}
+                  {renderTileContent ? (
+                    renderTileContent(tile)
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#71717a", fontSize: 12 }}>
+                      {tile.kind} tile ({tile.w}x{tile.h})
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </ReactGridLayout>
+      </div>
+    </div>
+  );
+}
