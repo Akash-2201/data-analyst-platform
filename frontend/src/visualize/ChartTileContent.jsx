@@ -45,6 +45,30 @@ export async function fetchTileChartData(datasetId, chartConfig) {
   return res;
 }
 
+class VisualErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err) {
+    console.warn("Visual render caught error:", err);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#a1a1aa", fontSize: 11, padding: 8, textAlign: "center" }}>
+          <span>Visual Rendering Notice</span>
+          <span style={{ fontSize: 9, color: "#71717a" }}>Configure valid X / Y columns</span>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function ChartTileContent({
   tile,
   datasetId,
@@ -145,16 +169,18 @@ export function ChartTileContent({
   }
 
   return (
-    <ChartRouter
-      chartType={chartConfig.chartType}
-      data={data}
-      columns={columns}
-      format={format}
-      chartConfig={chartConfig}
-      kpi={kpi}
-      crossFilter={crossFilter}
-      onPointClick={onPointClick}
-      isInteractive={isInteractive}
-    />
+    <VisualErrorBoundary>
+      <ChartRouter
+        chartType={chartConfig.chartType}
+        data={data}
+        columns={columns}
+        format={format}
+        chartConfig={chartConfig}
+        kpi={kpi}
+        crossFilter={crossFilter}
+        onPointClick={onPointClick}
+        isInteractive={isInteractive}
+      />
+    </VisualErrorBoundary>
   );
 }

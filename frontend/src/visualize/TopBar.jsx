@@ -132,6 +132,18 @@ export function TopBar({
           ↪ Redo
         </button>
 
+        {present.mode === "edit" && (
+          <button
+            type="button"
+            className="rpt-btn"
+            disabled={!present.clipboard || present.clipboard.length === 0}
+            onClick={() => dispatch({ type: "PASTE_TILES" })}
+            title="Paste (Ctrl+V)"
+          >
+            📋 Paste {present.clipboard?.length ? `(${present.clipboard.length})` : ""}
+          </button>
+        )}
+
         <div className="rpt-mode-toggle">
           <button
             type="button"

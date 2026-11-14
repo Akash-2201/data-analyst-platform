@@ -154,6 +154,8 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
   const tiles = [];
   let zIndex = 1;
 
+  const primaryCol = numerics[0] || categoricals[0] || "ID";
+
   // 1. Top Row: 3 KPI Cards (y: 10, h: 120)
   // KPI 1: Total Records
   tiles.push(
@@ -163,7 +165,7 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
       h: 120,
       z: zIndex++,
       title: "Total Records",
-      chartConfig: { chartType: "kpi", xCol: "", yCol: "", agg: "count" },
+      chartConfig: { chartType: "kpi", xCol: primaryCol, yCol: primaryCol, agg: "count" },
     })
   );
 
@@ -272,7 +274,7 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
         h: 290,
         z: zIndex++,
         title: "Data Table",
-        chartConfig: { chartType: "table", xCol: categoricals[0] || "", yCol: numerics[0] || "", agg: "count" },
+        chartConfig: { chartType: "table", xCol: categoricals[0] || primaryCol, yCol: numerics[0] || "", agg: "count" },
       })
     );
   }

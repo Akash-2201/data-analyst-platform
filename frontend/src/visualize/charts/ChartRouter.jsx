@@ -25,10 +25,11 @@ export function ChartRouter({
   onPointClick = null,
   isInteractive = false,
 }) {
-  if (!data) {
+  if (!data || data.detail || data.error) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#71717a", fontSize: 12 }}>
-        No chart data available
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#f87171", fontSize: 11, padding: 12, textAlign: "center" }}>
+        <span>⚠️ {data?.detail || data?.error || "No chart data available"}</span>
+        <span style={{ fontSize: 9, color: "#71717a", marginTop: 4 }}>Check X/Y columns in DATA panel</span>
       </div>
     );
   }
@@ -158,8 +159,8 @@ export function ChartRouter({
       return (
         <div style={{ width: "100%", height: "100%", position: "relative" }}>
           {renderSharedChart(
-            chartType,
             data,
+            chartType,
             chartConfig.xCol,
             chartConfig.yCol,
             chartConfig.agg

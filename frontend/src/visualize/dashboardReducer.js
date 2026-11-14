@@ -271,7 +271,10 @@ export function dashboardReducer(state, action) {
 
     case "COPY_TILES": {
       const targetIds = action.payload?.tileIds || present.selectedTileIds;
-      const tilesToCopy = activePage.tiles.filter((t) => targetIds.includes(t.id));
+      let tilesToCopy = activePage.tiles.filter((t) => targetIds.includes(t.id));
+      if (tilesToCopy.length === 0 && activePage.tiles.length === 1) {
+        tilesToCopy = activePage.tiles;
+      }
       if (tilesToCopy.length === 0) return state;
       return {
         ...state,
