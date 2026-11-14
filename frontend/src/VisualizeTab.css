@@ -954,20 +954,20 @@
 /* ── PDF Export Styles (Off-screen stage + clean capture) ───────────────────── */
 .rpt-export-stage {
   position: fixed;
-  left: -9999px;
-  top: -9999px;
+  left: 0;
+  top: 0;
   width: 1280px;
   height: 720px;
   background: #ffffff;
   overflow: hidden;
-  z-index: -999;
+  z-index: -9999;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
 }
 
 .rpt-exporting .rpt-canvas-dots,
-.rpt-exporting .rpt-drag-overlay {
-  display: none !important;
-}
-
+.rpt-exporting .rpt-drag-overlay,
 .rpt-exporting .rpt-tile-header,
 .rpt-exporting .rpt-tile-actions,
 .rpt-exporting .react-resizable-handle {
@@ -977,6 +977,7 @@
 .rpt-exporting .rpt-tile {
   border: 1px solid #e2e8f0 !important;
   box-shadow: none !important;
+  cursor: default !important;
 }
 
 .rpt-exporting .rpt-tile--selected {

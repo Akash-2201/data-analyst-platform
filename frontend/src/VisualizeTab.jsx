@@ -683,7 +683,7 @@ export default function VisualizeTab({
         setExportStagePage(page);
 
         // Wait for offscreen DOM and Recharts SVG layout to settle
-        await new Promise((resolve) => setTimeout(resolve, 450));
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
         if (!exportStageRef.current) {
           throw new Error("Export container unavailable");
@@ -694,6 +694,8 @@ export default function VisualizeTab({
           useCORS: true,
           logging: false,
           backgroundColor: "#ffffff",
+          width: CANVAS_W,
+          height: CANVAS_H,
           windowWidth: CANVAS_W,
           windowHeight: CANVAS_H,
         });
@@ -1281,6 +1283,7 @@ export default function VisualizeTab({
             allowOverlap={true}
             isDraggable={false}
             isResizable={false}
+            resizeHandles={[]}
           >
             {exportStagePage.tiles.map((tile) => (
               <div key={tile.id} className={`rpt-tile rpt-tile--${tile.kind}`}>
