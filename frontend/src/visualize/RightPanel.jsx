@@ -6,12 +6,13 @@
 import React, { useState } from "react";
 import { useDashboard } from "./dashboardContext";
 import { PALETTES } from "./constants";
+import { FilterTab } from "./FilterTab";
 
 export function RightPanel({ columns = [], isOpen = false }) {
   const { state, dispatch } = useDashboard();
   const { present } = state;
   const { activePageId, pages, selectedTileIds, mode } = present;
-  const [activeTab, setActiveTab] = useState("data"); // "data" | "format" | "filters"
+  const [activeTab, setActiveTab] = useState("data");
 
   const activePage = pages.find((p) => p.id === activePageId) || pages[0];
   const selectedTile = activePage?.tiles.find((t) => selectedTileIds?.includes(t.id));
@@ -146,7 +147,7 @@ export function RightPanel({ columns = [], isOpen = false }) {
 
                 {/* Y Axis */}
                 <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Y-Axis / Value</label>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Y-Axis / Metric</label>
                   <select
                     value={selectedTile.chartConfig?.yCol || ""}
                     onChange={(e) => updateChartConfig({ yCol: e.target.value })}
@@ -161,7 +162,31 @@ export function RightPanel({ columns = [], isOpen = false }) {
                       marginTop: 4,
                     }}
                   >
-                    <option value="">(Optional / None)</option>
+                    <option value="">(Optional / Count-based)</option>
+                    {colNames.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Stack / Legend Column */}
+                <div>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Legend / Stack Column</label>
+                  <select
+                    value={selectedTile.chartConfig?.stackCol || ""}
+                    onChange={(e) => updateChartConfig({ stackCol: e.target.value })}
+                    style={{
+                      width: "100%",
+                      background: "#18181b",
+                      border: "1px solid #27272a",
+                      color: "#f4f4f5",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    <option value="">(None)</option>
                     {colNames.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
@@ -217,9 +242,32 @@ export function RightPanel({ columns = [], isOpen = false }) {
                   </select>
                 </div>
 
+                {/* Date Grain */}
+                <div>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Date Grain</label>
+                  <select
+                    value={selectedTile.chartConfig?.dateGrain || "month"}
+                    onChange={(e) => updateChartConfig({ dateGrain: e.target.value })}
+                    style={{
+                      width: "100%",
+                      background: "#18181b",
+                      border: "1px solid #27272a",
+                      color: "#f4f4f5",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    <option value="day">Day</option>
+                    <option value="month">Month</option>
+                    <option value="year">Year</option>
+                  </select>
+                </div>
+
                 {/* Interaction Mode */}
                 <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Interaction</label>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Interaction Setting</label>
                   <select
                     value={selectedTile.interaction || "filter"}
                     onChange={(e) => updateTile({ interaction: e.target.value })}
@@ -236,7 +284,7 @@ export function RightPanel({ columns = [], isOpen = false }) {
                   >
                     <option value="filter">Filter other visuals</option>
                     <option value="highlight">Highlight non-matching</option>
-                    <option value="none">None (Ignore)</option>
+                    <option value="none">None (Ignore cross-filtering)</option>
                   </select>
                 </div>
               </div>
@@ -254,7 +302,7 @@ export function RightPanel({ columns = [], isOpen = false }) {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {/* Title */}
+                {/* General Title */}
                 <div>
                   <label style={{ fontSize: 11, color: "#a1a1aa" }}>Visual Title</label>
                   <input
@@ -316,6 +364,46 @@ export function RightPanel({ columns = [], isOpen = false }) {
                   </div>
                 </div>
 
+                {/* Title Alignment & Size */}
+                <div>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Title Align & Size</label>
+                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                    {["left", "center", "right"].map((align) => (
+                      <button
+                        key={align}
+                        type="button"
+                        className={`rpt-btn ${selectedTile.format?.titleAlign === align ? "rpt-btn-primary" : ""}`}
+                        style={{ fontSize: 11, flex: 1, textTransform: "capitalize", padding: "4px" }}
+                        onClick={() => updateFormat({ titleAlign: align })}
+                      >
+                        {align}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Show Toggles: Legend, Data Labels */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#d4d4d8", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTile.format?.showLegend !== false}
+                      onChange={(e) => updateFormat({ showLegend: e.target.checked })}
+                      style={{ accentColor: "#8b5cf6" }}
+                    />
+                    <span>Show Legend</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#d4d4d8", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTile.format?.showLabels === true}
+                      onChange={(e) => updateFormat({ showLabels: e.target.checked })}
+                      style={{ accentColor: "#8b5cf6" }}
+                    />
+                    <span>Show Data Labels</span>
+                  </label>
+                </div>
+
                 {/* Color Palette */}
                 <div>
                   <label style={{ fontSize: 11, color: "#a1a1aa" }}>Color Palette</label>
@@ -337,15 +425,41 @@ export function RightPanel({ columns = [], isOpen = false }) {
                 {/* Background & Border */}
                 <div>
                   <label style={{ fontSize: 11, color: "#a1a1aa" }}>Background & Border</label>
-                  <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-                    <input
-                      type="color"
-                      value={selectedTile.format?.bg || "#18181b"}
-                      onChange={(e) => updateFormat({ bg: e.target.value })}
-                      style={{ background: "transparent", border: "none", cursor: "pointer", width: 32, height: 28 }}
-                    />
-                    <span style={{ fontSize: 11, color: "#71717a" }}>Card BG</span>
+                  <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input
+                        type="color"
+                        value={selectedTile.format?.bg || "#18181b"}
+                        onChange={(e) => updateFormat({ bg: e.target.value })}
+                        style={{ background: "transparent", border: "none", cursor: "pointer", width: 28, height: 26 }}
+                      />
+                      <span style={{ fontSize: 11, color: "#71717a" }}>BG</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input
+                        type="color"
+                        value={selectedTile.format?.borderColor || "#27272a"}
+                        onChange={(e) => updateFormat({ borderColor: e.target.value })}
+                        style={{ background: "transparent", border: "none", cursor: "pointer", width: 28, height: 26 }}
+                      />
+                      <span style={{ fontSize: 11, color: "#71717a" }}>Border</span>
+                    </div>
                   </div>
+                </div>
+
+                {/* Border Radius Slider */}
+                <div>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>
+                    Border Radius: {selectedTile.format?.radius ?? 8}px
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={24}
+                    value={selectedTile.format?.radius ?? 8}
+                    onChange={(e) => updateFormat({ radius: parseInt(e.target.value, 10) })}
+                    style={{ width: "100%", accentColor: "#8b5cf6", marginTop: 4 }}
+                  />
                 </div>
               </div>
             )}
@@ -353,19 +467,7 @@ export function RightPanel({ columns = [], isOpen = false }) {
         )}
 
         {/* FILTERS TAB */}
-        {activeTab === "filters" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ fontSize: 11, color: "#a1a1aa" }}>
-              Page Filters for <strong>{activePage.name}</strong>
-            </div>
-            {/* Filter selection UI will be fully wired in Step 5 */}
-            <div style={{ fontSize: 12, color: "#71717a" }}>
-              {activePage?.filters?.length === 0
-                ? "No filters applied to this page yet."
-                : `${activePage.filters.length} active page filter(s).`}
-            </div>
-          </div>
-        )}
+        {activeTab === "filters" && <FilterTab columns={columns} />}
       </div>
     </aside>
   );
