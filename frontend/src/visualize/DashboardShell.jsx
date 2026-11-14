@@ -14,6 +14,11 @@ import { PageTabs } from "./PageTabs";
 import { LeftPanel } from "./LeftPanel";
 import { RightPanel } from "./RightPanel";
 import { Canvas } from "./Canvas";
+import {
+  exportDashboardPdf,
+  exportElementAsPng,
+  exportDataAsCsv,
+} from "./exportService";
 
 export function DashboardShell({
   datasetId,
@@ -49,9 +54,49 @@ export function DashboardShell({
   const [state, dispatch] = useReducer(dashboardReducer, null, getInitialState);
   const [saveTime, setSaveTime] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [exportProgress, setExportProgress] = useState(null);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const canvasRef = useRef(null);
+
+  const activePage = state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0];
+
+  const handleExportPdf = async () => {
+    try {
+      await exportDashboardPdf({
+        dashboard: state.present,
+        datasetFilename,
+        canvasRef,
+        onProgress: (msg) => setExportProgress(msg),
+      });
+    } catch (err) {
+      console.error("PDF export failed", err);
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      setExportProgress(null);
+    }
+  };
+
+  const handleExportPng = async () => {
+    if (canvasRef.current) {
+      await exportElementAsPng(canvasRef.current, `${datasetFilename}_${activePage?.name || "page"}`);
+    }
+  };
+
+  const handleExportCsv = () => {
+    // Collect sample rows from columns or tiles
+    const rows = [];
+    const colNames = (columns || []).map((c) => (typeof c === "string" ? c : c.name));
+    for (let i = 0; i < 20; i++) {
+      const row = {};
+      columns.forEach((c) => {
+        const name = typeof c === "string" ? c : c.name;
+        row[name] = c.sample_values ? c.sample_values[i] : "";
+      });
+      rows.push(row);
+    }
+    exportDataAsCsv(`${datasetFilename}_data.csv`, rows, colNames);
+  };
 
   // Autosave draft (debounced by 2 seconds)
   useEffect(() => {
@@ -143,14 +188,35 @@ export function DashboardShell({
 
         {/* CENTER WORKSPACE */}
         <div className="rpt-center-col">
+          {exportProgress && (
+            <div
+              style={{
+                position: "absolute",
+                top: 56,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 200,
+                background: "#8b5cf6",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: 20,
+                fontSize: 12,
+                fontWeight: 600,
+                boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
+              }}
+            >
+              ⏳ {exportProgress}
+            </div>
+          )}
+
           <TopBar
             onSave={handleSave}
             saveTime={saveTime}
             isSaving={isSaving}
             onGenerateDashboard={onGenerateDashboard}
-            onExportPdf={onExportPdf}
-            onExportPng={onExportPng}
-            onExportCsv={onExportCsv}
+            onExportPdf={onExportPdf || handleExportPdf}
+            onExportPng={onExportPng || handleExportPng}
+            onExportCsv={onExportCsv || handleExportCsv}
             toggleLeftDrawer={() => setLeftDrawerOpen(!leftDrawerOpen)}
             toggleRightDrawer={() => setRightDrawerOpen(!rightDrawerOpen)}
           />

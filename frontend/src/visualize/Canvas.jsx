@@ -15,6 +15,7 @@ import {
   rglLayoutToTilePx,
 } from "./utils";
 import { AlignToolbar } from "./AlignToolbar";
+import { exportElementAsPng, exportDataAsCsv } from "./exportService";
 
 export function Canvas({
   datasetId,
@@ -199,6 +200,7 @@ export function Canvas({
             return (
               <div
                 key={tile.id}
+                id={`tile-${tile.id}`}
                 className={`rpt-tile ${isSelected ? "selected" : ""}`}
                 style={{
                   backgroundColor: tile.format?.bg || "#18181b",
@@ -247,6 +249,34 @@ export function Canvas({
                       }}
                     >
                       📋
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn rpt-no-drag"
+                      title="Export Visual as PNG"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const tileEl = document.getElementById(`tile-${tile.id}`);
+                        if (tileEl) {
+                          await exportElementAsPng(tileEl, `${tile.title || "visual"}`);
+                        }
+                      }}
+                    >
+                      🖼️
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn rpt-no-drag"
+                      title="Export Visual Data as CSV"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        exportDataAsCsv(`${tile.title || "visual"}_data.csv`, [
+                          { [tile.chartConfig?.xCol || "Category"]: "Sample A", [tile.chartConfig?.yCol || "Value"]: 100 },
+                          { [tile.chartConfig?.xCol || "Category"]: "Sample B", [tile.chartConfig?.yCol || "Value"]: 250 },
+                        ]);
+                      }}
+                    >
+                      📊
                     </button>
                     <button
                       type="button"
