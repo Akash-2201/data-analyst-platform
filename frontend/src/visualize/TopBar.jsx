@@ -148,6 +148,39 @@ export function TopBar({
             View
           </button>
         </div>
+
+        {present.mode === "edit" && (
+          <div style={{ display: "inline-flex", gap: 4, marginLeft: 4 }}>
+            <button
+              type="button"
+              className={`rpt-btn ${present.settings?.snap ? "rpt-btn-primary" : ""}`}
+              onClick={() =>
+                dispatch({
+                  type: "SET_SETTINGS",
+                  payload: { snap: !present.settings?.snap },
+                })
+              }
+              title="Toggle Snap to Grid (20px vs 4px)"
+              style={{ fontSize: 11, padding: "4px 8px" }}
+            >
+              🧲 Snap {present.settings?.snap ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              className={`rpt-btn ${present.settings?.showGrid ? "rpt-btn-primary" : ""}`}
+              onClick={() =>
+                dispatch({
+                  type: "SET_SETTINGS",
+                  payload: { showGrid: !present.settings?.showGrid },
+                })
+              }
+              title="Toggle Grid Dots"
+              style={{ fontSize: 11, padding: "4px 8px" }}
+            >
+              ▦ Grid
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right: Generate Dashboard + Export Menu + Right drawer toggle */}

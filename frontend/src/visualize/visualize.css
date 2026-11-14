@@ -393,6 +393,70 @@
   z-index: 50 !important;
 }
 
+/* Resize handles in Edit Mode */
+.rpt-tile .react-resizable-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: #8b5cf6;
+  border: 1px solid #ffffff;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 40;
+}
+
+.rpt-tile.selected .react-resizable-handle,
+.rpt-tile:hover .react-resizable-handle {
+  opacity: 0.9;
+}
+
+.rpt-tile .react-resizable-handle:hover {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.rpt-tile .react-resizable-handle-se {
+  bottom: -3px;
+  right: -3px;
+  cursor: se-resize;
+}
+.rpt-tile .react-resizable-handle-sw {
+  bottom: -3px;
+  left: -3px;
+  cursor: sw-resize;
+}
+.rpt-tile .react-resizable-handle-ne {
+  top: -3px;
+  right: -3px;
+  cursor: ne-resize;
+}
+.rpt-tile .react-resizable-handle-nw {
+  top: -3px;
+  left: -3px;
+  cursor: nw-resize;
+}
+.rpt-tile .react-resizable-handle-e {
+  top: calc(50% - 5px);
+  right: -3px;
+  cursor: e-resize;
+}
+.rpt-tile .react-resizable-handle-w {
+  top: calc(50% - 5px);
+  left: -3px;
+  cursor: w-resize;
+}
+.rpt-tile .react-resizable-handle-s {
+  bottom: -3px;
+  left: calc(50% - 5px);
+  cursor: s-resize;
+}
+.rpt-tile .react-resizable-handle-n {
+  top: -3px;
+  left: calc(50% - 5px);
+  cursor: n-resize;
+}
+
 .rpt-tile-header {
   padding: 8px 12px;
   display: flex;

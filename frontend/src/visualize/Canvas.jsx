@@ -176,7 +176,18 @@ export function Canvas({
                   <div className="rpt-tile-hover-bar rpt-no-drag">
                     <button
                       type="button"
-                      className="rpt-hover-icon-btn"
+                      className="rpt-hover-icon-btn rpt-no-drag"
+                      title="Copy (Ctrl+C)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: "COPY_TILES", payload: { tileIds: [tile.id] } });
+                      }}
+                    >
+                      📄
+                    </button>
+                    <button
+                      type="button"
+                      className="rpt-hover-icon-btn rpt-no-drag"
                       title="Duplicate (Ctrl+D)"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -187,7 +198,7 @@ export function Canvas({
                     </button>
                     <button
                       type="button"
-                      className="rpt-hover-icon-btn"
+                      className="rpt-hover-icon-btn rpt-no-drag"
                       title="Bring to Front"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -198,7 +209,7 @@ export function Canvas({
                     </button>
                     <button
                       type="button"
-                      className="rpt-hover-icon-btn"
+                      className="rpt-hover-icon-btn rpt-no-drag"
                       title="Send to Back"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -209,7 +220,7 @@ export function Canvas({
                     </button>
                     <button
                       type="button"
-                      className="rpt-hover-icon-btn danger"
+                      className="rpt-hover-icon-btn danger rpt-no-drag"
                       title="Delete (Del)"
                       onClick={(e) => {
                         e.stopPropagation();
