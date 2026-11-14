@@ -239,7 +239,25 @@ export function Canvas({
 
                   {/* Render content: charts, tables, KPIs, slicers, or text */}
                   {renderTileContent ? (
-                    renderTileContent(tile)
+                    renderTileContent(tile, {
+                      crossFilter: activePage?.crossFilter,
+                      isInteractive: mode === "view",
+                      onPointClick: (pt) => {
+                        if (tile.interaction === "none") return;
+                        if (activePage?.crossFilter?.value === pt.label) {
+                          dispatch({ type: "CLEAR_CROSS_FILTER" });
+                        } else {
+                          dispatch({
+                            type: "SET_CROSS_FILTER",
+                            payload: {
+                              col: tile.chartConfig?.xCol,
+                              value: pt.label,
+                              sourceTileId: tile.id,
+                            },
+                          });
+                        }
+                      },
+                    })
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#71717a", fontSize: 12 }}>
                       {tile.kind} tile ({tile.w}x{tile.h})

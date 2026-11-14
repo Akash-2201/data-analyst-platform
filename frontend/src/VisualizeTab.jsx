@@ -24,11 +24,12 @@ export default function VisualizeTab({
       columns={columns}
       datasetFilename={datasetFilename}
       userId={userId}
-      renderTileContent={(tile) => (
+      renderTileContent={(tile, extraProps = {}) => (
         <ChartTileContent
           tile={tile}
           datasetId={datasetId}
           columns={columns}
+          {...extraProps}
         />
       )}
     />

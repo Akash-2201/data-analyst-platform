@@ -1,11 +1,11 @@
 /**
  * frontend/src/visualize/ChartTileContent.jsx
- * Fetches chart data and renders tile content (chart, text, slicer, kpi).
+ * Fetches chart data and renders tile content via ChartRouter (chart, text, slicer, kpi).
  */
 
 import React, { useState, useEffect } from "react";
 import { getChartData } from "../api";
-import { renderSharedChart } from "../ChartComponents";
+import { ChartRouter } from "./charts/ChartRouter";
 
 const chartDataMemoryCache = new Map();
 
@@ -14,7 +14,8 @@ export async function fetchTileChartData(datasetId, chartConfig) {
   if (!datasetId) return null;
   const isHeatmap = chartType === "heatmap";
   const isKPI = chartType === "kpi";
-  if (!isHeatmap && !isKPI && !xCol) return null;
+  const isTable = chartType === "table";
+  if (!isHeatmap && !isKPI && !isTable && !xCol) return null;
 
   const cacheKey = `${datasetId}:${chartType}:${xCol || ""}:${yCol || ""}:${stackCol || ""}:${agg || ""}`;
   if (chartDataMemoryCache.has(cacheKey)) {
@@ -27,11 +28,15 @@ export async function fetchTileChartData(datasetId, chartConfig) {
   else if (chartType === "box_plot" && yCol) fetchY = yCol;
   else fetchY = yCol || undefined;
 
+  let aggParam = agg;
+  if (agg === "avg" || agg === "average") aggParam = "mean";
+  else if (agg === "min" || agg === "max" || agg === "median") aggParam = "mean"; // backend query fallback
+
   const res = await getChartData(datasetId, {
     chartType,
     x: xCol || undefined,
     y: fetchY,
-    agg: agg === "average" ? "mean" : agg,
+    agg: aggParam,
     useCleaned: true,
   });
 
@@ -39,12 +44,19 @@ export async function fetchTileChartData(datasetId, chartConfig) {
   return res;
 }
 
-export function ChartTileContent({ tile, datasetId, columns = [] }) {
+export function ChartTileContent({
+  tile,
+  datasetId,
+  columns = [],
+  crossFilter = null,
+  onPointClick = null,
+  isInteractive = false,
+}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const { kind, chartConfig, text, slicer, kpi } = tile;
+  const { kind, chartConfig, format, text, slicer, kpi } = tile;
 
   // Text tile
   if (kind === "text") {
@@ -68,11 +80,11 @@ export function ChartTileContent({ tile, datasetId, columns = [] }) {
     );
   }
 
-  // Slicer tile placeholder
+  // Slicer tile
   if (kind === "slicer") {
     return (
       <div style={{ padding: 12, height: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, color: "#a1a1aa" }}>
+        <div style={{ fontSize: 12, color: "#a1a1aa", fontWeight: 600 }}>
           Slicer: {slicer?.col || "(No column selected)"}
         </div>
         <select
@@ -92,7 +104,7 @@ export function ChartTileContent({ tile, datasetId, columns = [] }) {
     );
   }
 
-  // Chart fetching effect
+  // Chart data fetching
   useEffect(() => {
     let active = true;
     if (!datasetId || !chartConfig) return;
@@ -122,7 +134,7 @@ export function ChartTileContent({ tile, datasetId, columns = [] }) {
   if (loading) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#71717a", fontSize: 12 }}>
-        Loading chart...
+        Loading visual...
       </div>
     );
   }
@@ -144,17 +156,17 @@ export function ChartTileContent({ tile, datasetId, columns = [] }) {
     );
   }
 
-  const chartElement = renderSharedChart(
-    chartConfig.chartType,
-    data,
-    chartConfig.xCol,
-    chartConfig.yCol,
-    chartConfig.agg
-  );
-
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {chartElement}
-    </div>
+    <ChartRouter
+      chartType={chartConfig.chartType}
+      data={data}
+      columns={columns}
+      format={format}
+      chartConfig={chartConfig}
+      kpi={kpi}
+      crossFilter={crossFilter}
+      onPointClick={onPointClick}
+      isInteractive={isInteractive}
+    />
   );
 }
