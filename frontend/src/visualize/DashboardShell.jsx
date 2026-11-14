@@ -19,6 +19,7 @@ import {
   exportElementAsPng,
   exportDataAsCsv,
 } from "./exportService";
+import { generateAutoDashboardPage } from "./autoDashboard";
 
 export function DashboardShell({
   datasetId,
@@ -60,6 +61,11 @@ export function DashboardShell({
   const canvasRef = useRef(null);
 
   const activePage = state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0];
+
+  const handleGenerateDashboard = () => {
+    const autoPage = generateAutoDashboardPage(columns, state.present.pages);
+    dispatch({ type: "ADD_GENERATED_PAGE", payload: autoPage });
+  };
 
   const handleExportPdf = async () => {
     try {
@@ -213,7 +219,7 @@ export function DashboardShell({
             onSave={handleSave}
             saveTime={saveTime}
             isSaving={isSaving}
-            onGenerateDashboard={onGenerateDashboard}
+            onGenerateDashboard={onGenerateDashboard || handleGenerateDashboard}
             onExportPdf={onExportPdf || handleExportPdf}
             onExportPng={onExportPng || handleExportPng}
             onExportCsv={onExportCsv || handleExportCsv}

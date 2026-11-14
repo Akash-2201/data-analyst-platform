@@ -112,6 +112,17 @@ export function dashboardReducer(state, action) {
       return pushHistory(state, newPresent);
     }
 
+    case "ADD_GENERATED_PAGE": {
+      const newPage = action.payload;
+      const newPresent = {
+        ...present,
+        pages: [...present.pages, newPage],
+        activePageId: newPage.id,
+        selectedTileIds: [],
+      };
+      return pushHistory(state, newPresent);
+    }
+
     case "RENAME_PAGE": {
       const { id, name } = action.payload;
       const newPages = present.pages.map((p) => (p.id === id ? { ...p, name } : p));

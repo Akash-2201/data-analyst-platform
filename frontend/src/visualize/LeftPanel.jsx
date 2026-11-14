@@ -10,6 +10,7 @@ import {
   MORE_VISUALIZATION_TYPES,
 } from "./constants";
 import { createDefaultTile, findFirstFreeSpot } from "./utils";
+import { getSmartRecommendations } from "./autoDashboard";
 
 export function LeftPanel({ columns = [], isOpen = false }) {
   const { state, dispatch } = useDashboard();
@@ -20,6 +21,24 @@ export function LeftPanel({ columns = [], isOpen = false }) {
 
   const activePage = pages.find((p) => p.id === activePageId) || pages[0];
   const selectedTile = activePage?.tiles.find((t) => selectedTileIds?.includes(t.id));
+
+  const recommendations = useMemo(() => getSmartRecommendations(columns), [columns]);
+
+  const handleAddRecommendation = (rec) => {
+    if (mode === "view") return;
+    const freeSpot = findFirstFreeSpot(activePage?.tiles || []);
+    const newTile = createDefaultTile("chart", {
+      spot: freeSpot,
+      title: rec.label,
+      chartConfig: {
+        chartType: rec.chartType,
+        xCol: rec.xCol,
+        yCol: rec.yCol,
+        agg: rec.agg || "sum",
+      },
+    });
+    dispatch({ type: "ADD_TILE", payload: newTile });
+  };
 
   const handleAddTile = (typeId) => {
     if (mode === "view") return;
@@ -221,6 +240,43 @@ export function LeftPanel({ columns = [], isOpen = false }) {
           </div>
         )}
       </div>
+
+      {/* Smart Recommendations Section */}
+      {recommendations.length > 0 && (
+        <div style={{ padding: "0 12px 10px 12px" }}>
+          <div className="rpt-panel-header" style={{ padding: "6px 0", borderBottom: "none", color: "#c4b5fd" }}>
+            <span>✨ Smart Recommendations</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {recommendations.slice(0, 3).map((rec) => (
+              <div
+                key={rec.id}
+                onClick={() => handleAddRecommendation(rec)}
+                className="rpt-rec-chip"
+                title={`${rec.reason}: click to add to canvas`}
+                style={{
+                  background: "rgba(139, 92, 246, 0.12)",
+                  border: "1px solid rgba(139, 92, 246, 0.3)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#e4e4e7", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span>+ {rec.chartType.toUpperCase()}</span>
+                  <span style={{ fontSize: 9, color: "#a78bfa" }}>Click to Add</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#a1a1aa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {rec.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* DATA FIELDS Header */}
       <div className="rpt-panel-header" style={{ marginTop: 8 }}>
