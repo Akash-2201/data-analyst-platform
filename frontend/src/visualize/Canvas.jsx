@@ -122,6 +122,55 @@ export function Canvas({
           position: "relative",
         }}
       >
+        {/* Active Cross Filter Indicator */}
+        {activePage?.crossFilter && (
+          <div
+            className="rpt-cross-filter-badge rpt-no-drag"
+            style={{
+              position: "absolute",
+              top: 10,
+              left: 10,
+              zIndex: 90,
+              background: "rgba(139, 92, 246, 0.9)",
+              color: "#ffffff",
+              padding: "4px 10px",
+              borderRadius: 20,
+              fontSize: 11,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}
+          >
+            <span>⚡ Filtered by {activePage.crossFilter.col}: {activePage.crossFilter.value}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({ type: "CLEAR_CROSS_FILTER" });
+              }}
+              style={{
+                background: "rgba(255,255,255,0.2)",
+                border: "none",
+                color: "#ffffff",
+                borderRadius: "50%",
+                width: 16,
+                height: 16,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 10,
+                lineHeight: 1,
+              }}
+              title="Clear cross-filter"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         <ReactGridLayout
           className="layout"
           layout={rglLayout}

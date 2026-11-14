@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { getChartData } from "../api";
 import { ChartRouter } from "./charts/ChartRouter";
+import { SlicerRenderer } from "./charts/SlicerRenderer";
 
 const chartDataMemoryCache = new Map();
 
@@ -83,24 +84,11 @@ export function ChartTileContent({
   // Slicer tile
   if (kind === "slicer") {
     return (
-      <div style={{ padding: 12, height: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, color: "#a1a1aa", fontWeight: 600 }}>
-          Slicer: {slicer?.col || "(No column selected)"}
-        </div>
-        <select
-          style={{
-            background: "#18181b",
-            border: "1px solid #3f3f46",
-            color: "#f4f4f5",
-            padding: "6px 8px",
-            borderRadius: 6,
-            fontSize: 12,
-          }}
-          disabled
-        >
-          <option>All items</option>
-        </select>
-      </div>
+      <SlicerRenderer
+        tile={tile}
+        columns={columns}
+        isInteractive={isInteractive}
+      />
     );
   }
 
