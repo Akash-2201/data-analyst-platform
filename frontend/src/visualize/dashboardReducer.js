@@ -225,10 +225,24 @@ export function dashboardReducer(state, action) {
 
     case "UPDATE_TILE_LAYOUT": {
       const { tileId, x, y, w, h } = action.payload;
+      const target = activePage.tiles.find((t) => t.id === tileId);
+      if (!target) return state;
+      const dx = x - target.x;
+      const dy = y - target.y;
       const clamped = clampTilePx(x, y, w, h);
+
       const newPresent = updateActivePage((page) => ({
         ...page,
-        tiles: page.tiles.map((t) => (t.id === tileId ? { ...t, ...clamped } : t)),
+        tiles: page.tiles.map((t) => {
+          if (t.id === tileId) {
+            return { ...t, ...clamped };
+          }
+          if (target.groupId && t.groupId === target.groupId && w === target.w && h === target.h) {
+            const shifted = clampTilePx(t.x + dx, t.y + dy, t.w, t.h);
+            return { ...t, ...shifted };
+          }
+          return t;
+        }),
       }));
       return pushHistory(state, newPresent);
     }
@@ -330,6 +344,91 @@ export function dashboardReducer(state, action) {
         tiles: page.tiles.map((t) => (t.id === tileId ? { ...t, z: Math.max(0, minZ - 1) } : t)),
       }));
       return pushHistory(state, newPresent);
+    }
+
+    case "GROUP_TILES": {
+      const targetIds = action.payload?.tileIds || present.selectedTileIds;
+      if (!targetIds || targetIds.length < 2) return state;
+      const newGroupId = `grp-${Date.now()}`;
+      const newPresent = updateActivePage((page) => ({
+        ...page,
+        tiles: page.tiles.map((t) =>
+          targetIds.includes(t.id) ? { ...t, groupId: newGroupId } : t
+        ),
+      }));
+      return pushHistory(state, newPresent);
+    }
+
+    case "UNGROUP_TILES": {
+      const targetIds = action.payload?.tileIds || present.selectedTileIds;
+      if (!targetIds || targetIds.length === 0) return state;
+      const newPresent = updateActivePage((page) => ({
+        ...page,
+        tiles: page.tiles.map((t) =>
+          targetIds.includes(t.id) ? { ...t, groupId: null } : t
+        ),
+      }));
+      return pushHistory(state, newPresent);
+    }
+
+    case "ALIGN_TILES": {
+      const { alignment } = action.payload;
+      const targetIds = present.selectedTileIds;
+      if (!targetIds || targetIds.length < 2) return state;
+      const selectedTiles = activePage.tiles.filter((t) => targetIds.includes(t.id));
+      if (selectedTiles.length < 2) return state;
+
+      let newPresent;
+      if (alignment === "left") {
+        const minX = Math.min(...selectedTiles.map((t) => t.x));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (targetIds.includes(t.id) ? { ...t, x: minX } : t)),
+        }));
+      } else if (alignment === "right") {
+        const maxR = Math.max(...selectedTiles.map((t) => t.x + t.w));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (targetIds.includes(t.id) ? { ...t, x: maxR - t.w } : t)),
+        }));
+      } else if (alignment === "top") {
+        const minY = Math.min(...selectedTiles.map((t) => t.y));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (targetIds.includes(t.id) ? { ...t, y: minY } : t)),
+        }));
+      } else if (alignment === "bottom") {
+        const maxB = Math.max(...selectedTiles.map((t) => t.y + t.h));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (targetIds.includes(t.id) ? { ...t, y: maxB - t.h } : t)),
+        }));
+      } else if (alignment === "distributeH") {
+        const sorted = [...selectedTiles].sort((a, b) => a.x - b.x);
+        const minX = sorted[0].x;
+        const maxX = sorted[sorted.length - 1].x;
+        const totalSpan = maxX - minX;
+        const step = totalSpan / (sorted.length - 1);
+        const idToX = new Map();
+        sorted.forEach((t, idx) => idToX.set(t.id, Math.round(minX + idx * step)));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (idToX.has(t.id) ? { ...t, x: idToX.get(t.id) } : t)),
+        }));
+      } else if (alignment === "distributeV") {
+        const sorted = [...selectedTiles].sort((a, b) => a.y - b.y);
+        const minY = sorted[0].y;
+        const maxY = sorted[sorted.length - 1].y;
+        const totalSpan = maxY - minY;
+        const step = totalSpan / (sorted.length - 1);
+        const idToY = new Map();
+        sorted.forEach((t, idx) => idToY.set(t.id, Math.round(minY + idx * step)));
+        newPresent = updateActivePage((page) => ({
+          ...page,
+          tiles: page.tiles.map((t) => (idToY.has(t.id) ? { ...t, y: idToY.get(t.id) } : t)),
+        }));
+      }
+      return newPresent ? pushHistory(state, newPresent) : state;
     }
 
     case "SET_PAGE_FILTER": {

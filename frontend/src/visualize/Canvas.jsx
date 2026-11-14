@@ -14,6 +14,7 @@ import {
   tileToRglLayout,
   rglLayoutToTilePx,
 } from "./utils";
+import { AlignToolbar } from "./AlignToolbar";
 
 export function Canvas({
   datasetId,
@@ -122,6 +123,8 @@ export function Canvas({
           position: "relative",
         }}
       >
+        <AlignToolbar />
+
         {/* Active Cross Filter Indicator */}
         {activePage?.crossFilter && (
           <div
