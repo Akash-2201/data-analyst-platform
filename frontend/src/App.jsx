@@ -2534,7 +2534,7 @@ export default function App() {
           </div>
 
           {/* ========== VISUALIZE TAB ========== */}
-          <div style={{ display: activeTab === "visualize" ? "block" : "none" }}>
+          <div className="viz-tab-container" style={{ display: activeTab === "visualize" ? "flex" : "none", flex: "1 1 0%", minHeight: 0, flexDirection: "column" }}>
             <VisualizeTab
               reportState={vizReportState}
               setReportState={setVizReportState}

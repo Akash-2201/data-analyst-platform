@@ -62,24 +62,9 @@ export function DashboardShell({
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const canvasRef = useRef(null);
   const rootRef = useRef(null);
-  const [rootHeight, setRootHeight] = useState(null);
   const [zoomMode, setZoomMode] = useState("fit"); // "fit" | number
   const [scale, setScale] = useState(1);
   const [fitScale, setFitScale] = useState(1);
-
-  // Dynamic root height calculation to fill window without page-level scrollbar
-  useEffect(() => {
-    const updateHeight = () => {
-      if (!rootRef.current) return;
-      const rect = rootRef.current.getBoundingClientRect();
-      const calculated = window.innerHeight - rect.top - 12;
-      setRootHeight(Math.max(560, calculated));
-    };
-
-    updateHeight();
-    window.addEventListener("resize", updateHeight);
-    return () => window.removeEventListener("resize", updateHeight);
-  }, []);
 
   const activePage = state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0];
 
@@ -217,7 +202,7 @@ export function DashboardShell({
       <div
         ref={rootRef}
         className="rpt-dashboard-root"
-        style={{ height: rootHeight ? `${rootHeight}px` : "calc(100vh - 60px)" }}
+        style={{ height: "100%" }}
       >
         {/* LEFT PANEL (260px) */}
         <LeftPanel

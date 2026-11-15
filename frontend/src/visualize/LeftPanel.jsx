@@ -230,7 +230,7 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
               <div
                 key={rec.id}
                 onClick={() => handleAddRecommendation(rec)}
-                className="rpt-rec-chip"
+                className="rpt-rec-chip rpt-recommendation-card"
                 title={`${rec.reason}: click to add to canvas`}
                 style={{
                   background: "rgba(139, 92, 246, 0.12)",
