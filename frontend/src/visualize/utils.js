@@ -28,11 +28,13 @@ export function makeTileId(kind = "chart") {
   return makeId(`tile-${kind}`);
 }
 
-export function makeEmptyPage(name = "Page 1") {
+export function makeEmptyPage(name = "Page 1", size = { w: 1920, h: 1080 }) {
   return {
     id: makePageId(),
     name,
     hidden: false,
+    size: { w: size.w || 1920, h: size.h || 1080 },
+    autoGrowHeight: false,
     tiles: [],
     filters: [],
     crossFilter: null,
@@ -75,11 +77,11 @@ export function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-export function clampTilePx(x, y, w, h) {
-  const clampedW = clamp(w, MIN_TILE_W, CANVAS_W);
-  const clampedH = clamp(h, MIN_TILE_H, CANVAS_H);
-  const clampedX = clamp(x, 0, Math.max(0, CANVAS_W - clampedW));
-  const clampedY = clamp(y, 0, Math.max(0, CANVAS_H - clampedH));
+export function clampTilePx(x, y, w, h, pageW = CANVAS_W, pageH = CANVAS_H) {
+  const clampedW = clamp(w, MIN_TILE_W, pageW);
+  const clampedH = clamp(h, MIN_TILE_H, pageH);
+  const clampedX = clamp(x, 0, Math.max(0, pageW - clampedW));
+  const clampedY = clamp(y, 0, Math.max(0, pageH - clampedH));
   return { x: clampedX, y: clampedY, w: clampedW, h: clampedH };
 }
 
@@ -110,10 +112,10 @@ export function rglLayoutToTilePx(item, snap = true) {
   return clampTilePx(pxX, pxY, pxW, pxH);
 }
 
-export function findFirstFreeSpot(tiles = [], w = DEFAULT_TILE_W, h = DEFAULT_TILE_H) {
+export function findFirstFreeSpot(tiles = [], w = DEFAULT_TILE_W, h = DEFAULT_TILE_H, pageW = CANVAS_W, pageH = CANVAS_H) {
   const step = 20;
-  for (let y = 0; y <= CANVAS_H - h; y += step) {
-    for (let x = 0; x <= CANVAS_W - w; x += step) {
+  for (let y = 0; y <= pageH - h; y += step) {
+    for (let x = 0; x <= pageW - w; x += step) {
       const collides = tiles.some((t) => {
         return x < t.x + t.w && x + w > t.x && y < t.y + t.h && y + h > t.y;
       });
@@ -125,10 +127,12 @@ export function findFirstFreeSpot(tiles = [], w = DEFAULT_TILE_W, h = DEFAULT_TI
   return { x: 0, y: 0 };
 }
 
-export function createDefaultTile(kind = "chart", options = {}) {
+export function createDefaultTile(kind = "chart", options = {}, pageW = CANVAS_W, pageH = CANVAS_H) {
+  const defaultW = Math.round((pageW / 3) / 20) * 20;
+  const defaultH = Math.round((pageH / 3) / 20) * 20;
   const spot = options.spot || { x: 0, y: 0 };
-  const w = options.w || (kind === "slicer" ? 280 : kind === "text" ? 440 : DEFAULT_TILE_W);
-  const h = options.h || (kind === "slicer" ? 180 : kind === "text" ? 100 : DEFAULT_TILE_H);
+  const w = options.w || (kind === "slicer" ? 280 : kind === "text" ? 440 : defaultW);
+  const h = options.h || (kind === "slicer" ? 180 : kind === "text" ? 100 : defaultH);
 
   return {
     id: makeTileId(kind),

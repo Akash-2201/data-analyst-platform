@@ -30,9 +30,21 @@ function pushHistory(state, newPresent) {
 }
 
 export function createInitialState(initialDashboard) {
+  const migratedPages = (initialDashboard?.pages || []).map((page) => ({
+    ...page,
+    size: {
+      w: page.size?.w || 1920,
+      h: page.size?.h || 1080,
+    },
+    autoGrowHeight: page.autoGrowHeight || false,
+  }));
+
   return {
     past: [],
-    present: initialDashboard,
+    present: {
+      ...initialDashboard,
+      pages: migratedPages.length > 0 ? migratedPages : [makeEmptyPage("Page 1")],
+    },
     future: [],
   };
 }
@@ -127,6 +139,55 @@ export function dashboardReducer(state, action) {
       const { id, name } = action.payload;
       const newPages = present.pages.map((p) => (p.id === id ? { ...p, name } : p));
       return pushHistory(state, { ...present, pages: newPages });
+    }
+
+    case "UPDATE_PAGE_SIZE": {
+      const { w, h, autoGrowHeight } = action.payload || {};
+      const targetW = w !== undefined ? Math.max(640, Math.min(4000, Math.round(w))) : (activePage.size?.w || 1920);
+      const targetH = h !== undefined ? Math.max(360, Math.min(4000, Math.round(h))) : (activePage.size?.h || 1080);
+      const targetAutoGrow = autoGrowHeight !== undefined ? autoGrowHeight : (activePage.autoGrowHeight || false);
+
+      let movedCount = 0;
+      const clampedTiles = activePage.tiles.map((t) => {
+        const clamped = clampTilePx(t.x, t.y, t.w, t.h, targetW, targetH);
+        if (clamped.x !== t.x || clamped.y !== t.y || clamped.w !== t.w || clamped.h !== t.h) {
+          movedCount++;
+        }
+        return { ...t, ...clamped };
+      });
+
+      const updated = {
+        ...activePage,
+        size: { w: targetW, h: targetH },
+        autoGrowHeight: targetAutoGrow,
+        tiles: clampedTiles,
+      };
+
+      return pushHistory(state, {
+        ...updateActivePage(() => updated),
+        lastPageResizeMovedCount: movedCount,
+      });
+    }
+
+    case "GROW_PAGE_HEIGHT": {
+      const { pageId, addH = 120 } = action.payload || {};
+      const pg = present.pages.find((p) => p.id === pageId) || activePage;
+      const currentH = pg.size?.h || 1080;
+      const currentW = pg.size?.w || 1920;
+      const nextH = Math.min(4000, currentH + addH);
+      if (nextH === currentH) return state;
+
+      const updated = {
+        ...pg,
+        size: { w: currentW, h: nextH },
+      };
+      return {
+        ...state,
+        present: {
+          ...present,
+          pages: present.pages.map((p) => (p.id === pg.id ? updated : p)),
+        },
+      };
     }
 
     case "DUPLICATE_PAGE": {

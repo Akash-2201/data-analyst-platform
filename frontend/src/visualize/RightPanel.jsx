@@ -348,9 +348,116 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
         {activeTab === "format" && (
           <div>
             {!selectedTile ? (
-              <div className="rpt-empty-state-hint">
-                <span>🎨</span>
-                <span>Select a visual on the canvas to format its appearance.</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div className="rpt-section-title" style={{ padding: 0, color: "#a78bfa" }}>
+                  📄 Page Settings ({activePage?.name || "Page"})
+                </div>
+
+                {/* Page Size Presets */}
+                <div>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Page Size Preset</label>
+                  <select
+                    value={
+                      activePage?.size?.w === 1920 && activePage?.size?.h === 1080 ? "16:9-1080" :
+                      activePage?.size?.w === 1280 && activePage?.size?.h === 720 ? "16:9-720" :
+                      activePage?.size?.w === 2560 && activePage?.size?.h === 1440 ? "16:9-1440" :
+                      activePage?.size?.w === 1600 && activePage?.size?.h === 1200 ? "4:3-1200" :
+                      activePage?.size?.w === 1080 && activePage?.size?.h === 1920 ? "tall-1080" : "custom"
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "16:9-1080") dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: 1920, h: 1080 } });
+                      else if (val === "16:9-720") dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: 1280, h: 720 } });
+                      else if (val === "16:9-1440") dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: 2560, h: 1440 } });
+                      else if (val === "4:3-1200") dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: 1600, h: 1200 } });
+                      else if (val === "tall-1080") dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: 1080, h: 1920 } });
+                    }}
+                    style={{
+                      width: "100%",
+                      background: "#18181b",
+                      border: "1px solid #27272a",
+                      color: "#f4f4f5",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    <option value="16:9-1080">16:9 (1920 × 1080) Full HD - Default</option>
+                    <option value="16:9-720">16:9 (1280 × 720) HD</option>
+                    <option value="16:9-1440">16:9 (2560 × 1440) 2K QHD</option>
+                    <option value="4:3-1200">4:3 (1600 × 1200)</option>
+                    <option value="tall-1080">Tall (1080 × 1920) Mobile / Story</option>
+                    <option value="custom">Custom Size</option>
+                  </select>
+                </div>
+
+                {/* Custom Width & Height */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#71717a" }}>Width (px)</label>
+                    <input
+                      type="number"
+                      min={640}
+                      max={4000}
+                      value={activePage?.size?.w || 1920}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) dispatch({ type: "UPDATE_PAGE_SIZE", payload: { w: val } });
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "4px 6px",
+                        borderRadius: 4,
+                        fontSize: 11,
+                        marginTop: 2,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#71717a" }}>Height (px)</label>
+                    <input
+                      type="number"
+                      min={360}
+                      max={4000}
+                      value={activePage?.size?.h || 1080}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) dispatch({ type: "UPDATE_PAGE_SIZE", payload: { h: val } });
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "4px 6px",
+                        borderRadius: 4,
+                        fontSize: 11,
+                        marginTop: 2,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Auto-grow Height Toggle */}
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#d4d4d8", cursor: "pointer", marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={activePage?.autoGrowHeight || false}
+                    onChange={(e) => dispatch({ type: "UPDATE_PAGE_SIZE", payload: { autoGrowHeight: e.target.checked } })}
+                    style={{ accentColor: "#8b5cf6" }}
+                  />
+                  <span>Auto-grow height as tiles expand</span>
+                </label>
+
+                {present.lastPageResizeMovedCount > 0 && (
+                  <div style={{ fontSize: 10, color: "#f59e0b", background: "rgba(245, 158, 11, 0.1)", padding: "6px 8px", borderRadius: 4 }}>
+                    ⚠️ {present.lastPageResizeMovedCount} tile(s) repositioned to fit inside new page bounds.
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -374,8 +481,46 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
                   />
                 </div>
 
-                {/* Dimensions (px) */}
+                {/* Position & Dimensions (px) */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#71717a" }}>X (px)</label>
+                    <input
+                      type="number"
+                      value={selectedTile.x}
+                      onChange={(e) =>
+                        updateTile({ x: parseInt(e.target.value, 10) || 0 })
+                      }
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "4px 6px",
+                        borderRadius: 4,
+                        fontSize: 11,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#71717a" }}>Y (px)</label>
+                    <input
+                      type="number"
+                      value={selectedTile.y}
+                      onChange={(e) =>
+                        updateTile({ y: parseInt(e.target.value, 10) || 0 })
+                      }
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "4px 6px",
+                        borderRadius: 4,
+                        fontSize: 11,
+                      }}
+                    />
+                  </div>
                   <div>
                     <label style={{ fontSize: 10, color: "#71717a" }}>Width (px)</label>
                     <input

@@ -3,8 +3,23 @@
  * Core constants, default settings, and color palettes for the Power BI Dashboard Builder.
  */
 
-export const CANVAS_W = 1280;
-export const CANVAS_H = 720;
+export const CANVAS_W = 1920;
+export const CANVAS_H = 1080;
+export const DEFAULT_PAGE_W = 1920;
+export const DEFAULT_PAGE_H = 1080;
+export const MIN_PAGE_W = 640;
+export const MIN_PAGE_H = 360;
+export const MAX_PAGE_W = 4000;
+export const MAX_PAGE_H = 4000;
+
+export const PAGE_SIZE_PRESETS = [
+  { id: "16:9-1080", label: "16:9 (1920 × 1080) Full HD", w: 1920, h: 1080 },
+  { id: "16:9-720", label: "16:9 (1280 × 720) HD", w: 1280, h: 720 },
+  { id: "16:9-1440", label: "16:9 (2560 × 1440) 2K QHD", w: 2560, h: 1440 },
+  { id: "4:3-1200", label: "4:3 (1600 × 1200)", w: 1600, h: 1200 },
+  { id: "tall-1080", label: "Tall (1080 × 1920) Mobile / Story", w: 1080, h: 1920 },
+  { id: "custom", label: "Custom Size", w: null, h: null },
+];
 
 export const CELL_SNAP = 20; // 20px cell when snap to grid is ON
 export const CELL_FREE = 4;  // 4px cell when snap is OFF

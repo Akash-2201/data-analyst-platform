@@ -37,17 +37,20 @@ export function Canvas({
 
   const tiles = activePage?.tiles || [];
 
-  // Compute transform scale to fit container width & height maintaining 16:9
+  const pageW = activePage?.size?.w || 1920;
+  const pageH = activePage?.size?.h || 1080;
+
+  // Compute transform scale to fit container width & height
   const updateFitScale = useCallback(() => {
     if (!viewportRef.current || !setFitScale) return;
     const { clientWidth, clientHeight } = viewportRef.current;
     if (clientWidth <= 0 || clientHeight <= 0) return;
-    const fitW = (clientWidth - 48) / CANVAS_W;
-    const fitH = (clientHeight - 48) / CANVAS_H;
-    const computedFit = Math.min(fitW, fitH);
-    const clampedFit = Math.min(2.0, Math.max(0.3, computedFit));
+    const fitW = (clientWidth - 16) / pageW;
+    const fitH = (clientHeight - 16) / pageH;
+    const computedFit = (zoomMode === "fitPage" || zoomMode === "fit") ? Math.min(fitW, fitH) : fitW;
+    const clampedFit = Math.min(2.0, Math.max(0.25, computedFit));
     setFitScale(clampedFit);
-  }, [setFitScale]);
+  }, [pageW, pageH, zoomMode, setFitScale]);
 
   useEffect(() => {
     updateFitScale();
@@ -65,7 +68,9 @@ export function Canvas({
   }, [updateFitScale]);
 
   // Derived effective scale
-  const effectiveScale = zoomMode === "fit" ? (fitScale || 1) : (typeof zoomMode === "number" ? zoomMode : 1);
+  const effectiveScale = (zoomMode === "fitWidth" || zoomMode === "fitPage" || zoomMode === "fit")
+    ? (fitScale || 1)
+    : (typeof zoomMode === "number" ? zoomMode : 1);
 
   useEffect(() => {
     if (setScale && effectiveScale) {
@@ -90,7 +95,7 @@ export function Canvas({
 
   // Grid columns and cell size based on snap setting
   const cell = getGridCell(snap);
-  const cols = Math.round(CANVAS_W / cell);
+  const cols = Math.max(1, Math.round(pageW / cell));
 
   // Generate RGL layout items
   const rglLayout = useMemo(() => {
@@ -146,8 +151,8 @@ export function Canvas({
       <div
         className="rpt-canvas-outer"
         style={{
-          width: Math.round(CANVAS_W * effectiveScale),
-          height: Math.round(CANVAS_H * effectiveScale),
+          width: Math.round(pageW * effectiveScale),
+          height: Math.round(pageH * effectiveScale),
           margin: "auto",
           position: "relative",
           flexShrink: 0,
@@ -157,8 +162,8 @@ export function Canvas({
           ref={canvasRef}
           className={`rpt-canvas-wrapper ${showGrid && mode === "edit" ? "grid-dots" : ""}`}
           style={{
-            width: CANVAS_W,
-            height: CANVAS_H,
+            width: pageW,
+            height: pageH,
             transform: `scale(${effectiveScale})`,
             transformOrigin: "top left",
             position: "absolute",
@@ -222,7 +227,7 @@ export function Canvas({
           layout={rglLayout}
           cols={cols}
           rowHeight={cell}
-          width={CANVAS_W}
+          width={pageW}
           margin={[0, 0]}
           containerPadding={[0, 0]}
           compactType={null}

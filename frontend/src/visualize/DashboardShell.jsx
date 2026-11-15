@@ -104,7 +104,7 @@ export function DashboardShell({
   const canvasRef = useRef(null);
   const rootRef = useRef(null);
   const placeholderRef = useRef(null);
-  const [zoomMode, setZoomMode] = useState("fit"); // "fit" | number
+  const [zoomMode, setZoomMode] = useState("fitWidth"); // "fitWidth" | "fitPage" | number
   const [scale, setScale] = useState(1);
   const [fitScale, setFitScale] = useState(1);
 

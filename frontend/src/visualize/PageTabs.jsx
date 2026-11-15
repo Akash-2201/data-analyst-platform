@@ -228,13 +228,23 @@ export function PageTabs() {
               >
                 <button
                   type="button"
-                  className={`rpt-zoom-menu-item ${zoomMode === "fit" ? "active" : ""}`}
+                  className={`rpt-zoom-menu-item ${zoomMode === "fitWidth" ? "active" : ""}`}
                   onClick={() => {
-                    setZoomMode("fit");
+                    setZoomMode("fitWidth");
                     setShowZoomMenu(false);
                   }}
                 >
-                  Fit to page
+                  Fit width
+                </button>
+                <button
+                  type="button"
+                  className={`rpt-zoom-menu-item ${zoomMode === "fitPage" ? "active" : ""}`}
+                  onClick={() => {
+                    setZoomMode("fitPage");
+                    setShowZoomMenu(false);
+                  }}
+                >
+                  Fit page
                 </button>
                 {ZOOM_PRESETS.map((p) => (
                   <button
@@ -262,11 +272,11 @@ export function PageTabs() {
           </button>
           <button
             type="button"
-            className={`rpt-zoom-btn ${zoomMode === "fit" ? "active" : ""}`}
-            onClick={() => setZoomMode("fit")}
-            title="Fit to page"
+            className={`rpt-zoom-btn ${zoomMode === "fitWidth" || zoomMode === "fitPage" ? "active" : ""}`}
+            onClick={() => setZoomMode(zoomMode === "fitWidth" ? "fitPage" : "fitWidth")}
+            title="Toggle Fit Width / Fit Page"
           >
-            Fit
+            {zoomMode === "fitPage" ? "Fit P" : "Fit W"}
           </button>
         </div>
       )}

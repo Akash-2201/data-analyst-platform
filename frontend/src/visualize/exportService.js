@@ -39,10 +39,14 @@ export async function exportDashboardPdf({
     return;
   }
 
+  const firstPage = visiblePages[0];
+  const firstW = firstPage?.size?.w || CANVAS_W;
+  const firstH = firstPage?.size?.h || CANVAS_H;
+
   const pdf = new jsPDF({
-    orientation: "landscape",
+    orientation: firstW >= firstH ? "landscape" : "portrait",
     unit: "px",
-    format: [CANVAS_W, CANVAS_H],
+    format: [firstW, firstH],
     hotfixes: ["px_scaling"],
   });
 
@@ -50,6 +54,10 @@ export async function exportDashboardPdf({
 
   for (let i = 0; i < totalPages; i++) {
     const page = visiblePages[i];
+    const pageW = page.size?.w || CANVAS_W;
+    const pageH = page.size?.h || CANVAS_H;
+    const orientation = pageW >= pageH ? "landscape" : "portrait";
+
     if (onProgress) {
       onProgress(`Exporting page ${i + 1} of ${totalPages}: ${page.name}...`);
     }
@@ -67,17 +75,17 @@ export async function exportDashboardPdf({
 
         const imgData = canvas.toDataURL("image/jpeg", 0.95);
         if (i > 0) {
-          pdf.addPage([CANVAS_W, CANVAS_H], "landscape");
+          pdf.addPage([pageW, pageH], orientation);
         }
-        pdf.addImage(imgData, "JPEG", 0, 0, CANVAS_W, CANVAS_H);
+        pdf.addImage(imgData, "JPEG", 0, 0, pageW, pageH);
 
         // Add clean page footer
         pdf.setFontSize(10);
         pdf.setTextColor(161, 161, 170); // #a1a1aa
         pdf.text(
           `${page.name} | Page ${i + 1} of ${totalPages}`,
-          CANVAS_W / 2,
-          CANVAS_H - 12,
+          pageW / 2,
+          pageH - 12,
           { align: "center" }
         );
       } finally {
