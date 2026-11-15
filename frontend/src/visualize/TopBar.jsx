@@ -158,6 +158,21 @@ export function TopBar({
           </button>
         </div>
 
+        <span
+          className={`rpt-mode-badge ${present.mode === "edit" ? "edit" : "view"}`}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: "2px 8px",
+            borderRadius: 12,
+            background: present.mode === "edit" ? "rgba(139, 92, 246, 0.15)" : "rgba(16, 185, 129, 0.15)",
+            color: present.mode === "edit" ? "#c4b5fd" : "#6ee7b7",
+            border: `1px solid ${present.mode === "edit" ? "rgba(139, 92, 246, 0.3)" : "rgba(16, 185, 129, 0.3)"}`,
+          }}
+        >
+          {present.mode === "edit" ? "✏️ Edit Mode" : "👁️ View Mode"}
+        </span>
+
         {present.mode === "edit" && (
           <>
             <button

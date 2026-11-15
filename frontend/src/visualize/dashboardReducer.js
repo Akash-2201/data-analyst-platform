@@ -319,6 +319,30 @@ export function dashboardReducer(state, action) {
       return pushHistory(state, newPresent);
     }
 
+    case "UPDATE_TILES_LAYOUT": {
+      const updates = action.payload || [];
+      if (updates.length === 0) return state;
+      const updateMap = new Map(updates.map((u) => [u.tileId, u]));
+      const pageW = activePage.size?.w || 1920;
+      const pageH = activePage.size?.h || 1080;
+
+      const newTiles = activePage.tiles.map((t) => {
+        const u = updateMap.get(t.id);
+        if (!u) return t;
+        const clamped = clampTilePx(
+          u.x !== undefined ? u.x : t.x,
+          u.y !== undefined ? u.y : t.y,
+          u.w !== undefined ? u.w : t.w,
+          u.h !== undefined ? u.h : t.h,
+          pageW,
+          pageH
+        );
+        return { ...t, ...clamped };
+      });
+
+      return pushHistory(state, updateActivePage((p) => ({ ...p, tiles: newTiles })));
+    }
+
     case "DELETE_TILES": {
       const targetIds = action.payload?.tileIds || present.selectedTileIds;
       if (!targetIds || targetIds.length === 0) return state;
