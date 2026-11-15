@@ -4,157 +4,150 @@
  */
 
 import { CANVAS_W, CANVAS_H } from "./constants";
-import { makePageId, makeTileId, createDefaultTile } from "./utils";
+import { makePageId, makeTileId, createDefaultTile, classifyColumn } from "./utils";
 
 export function getSmartRecommendations(columns = []) {
   const recommendations = [];
 
+  const classified = (columns || []).map(classifyColumn);
+
+  // 1. Measures (Amount, Quantity) - STRICTLY numeric measures, excluding Age, Phone, IDs, Coordinates
+  const measures = classified.filter((c) => c.group === "NUMERICAL" && c.isMeasure);
+  // Numeric attributes that are NOT measures (e.g. Age)
+  const numericAttributes = classified.filter((c) => c.group === "NUMERICAL" && !c.isMeasure);
+
+  // 2. Dates
+  const dates = classified.filter((c) => c.group === "DATE");
+
+  // 3. Categoricals (Text, excluding identifiers, with distinct value counts)
   const categoricals = [];
-  const numerics = [];
-  const dates = [];
-  let latCol = null;
-  let lonCol = null;
-
-  (columns || []).forEach((col) => {
-    const name = typeof col === "string" ? col : col.name;
-    const inferred = (col.inferred_type || col.dtype || "").toLowerCase();
-    const nameLower = name.toLowerCase();
-    const uniquePct = col.unique_pct ?? (col.unique_count && col.totalRows ? (col.unique_count / col.totalRows) * 100 : 50);
-
-    if (nameLower.endsWith("_outlier") || nameLower.includes("_flag_") || nameLower.startsWith("is_")) {
-      return;
-    }
-
-    if (nameLower.includes("lat")) latCol = name;
-    else if (nameLower.includes("lon") || nameLower.includes("lng")) lonCol = name;
-
-    if (inferred.includes("date") || inferred.includes("time") || nameLower.includes("date") || nameLower.includes("year")) {
-      dates.push(name);
-    } else if (inferred.includes("int") || inferred.includes("float") || inferred.includes("numeric") || col.numeric_stats) {
-      if (uniquePct < 98) {
-        numerics.push(name);
-      }
-    } else {
-      if (uniquePct < 90) {
-        categoricals.push({ name, uniqueCount: col.unique_count || 5 });
-      }
+  (columns || []).forEach((rawCol) => {
+    const info = classifyColumn(rawCol);
+    if (info.group === "TEXT" && info.subType !== "Identifier") {
+      const distinctCount = rawCol.unique_count ?? (rawCol.sample_values ? new Set(rawCol.sample_values).size : 5);
+      categoricals.push({ ...info, distinctCount });
     }
   });
 
-  // Rule 1: Date + Numeric -> Line chart
-  if (dates.length > 0 && numerics.length > 0) {
+  // Coordinates
+  const latCol = classified.find((c) => /^lat(itude)?$/i.test(c.name));
+  const lonCol = classified.find((c) => /^(lon|lng|longitude)$/i.test(c.name));
+
+  const primaryMeasure = measures[0]?.name || "Amount";
+
+  // Recommendation 1: Line Chart (Date + Measure, Month Grain)
+  if (dates.length > 0 && measures.length > 0) {
     recommendations.push({
       id: "rec-line",
-      label: `Trend: ${numerics[0]} over ${dates[0]}`,
+      label: `${primaryMeasure} by ${dates[0].name} (month)`,
       chartType: "line",
-      xCol: dates[0],
-      yCol: numerics[0],
+      xCol: dates[0].name,
+      yCol: primaryMeasure,
       agg: "sum",
-      reason: "Date + Numeric detected",
+      dateGrain: "month",
+      reason: `Monthly trend of ${primaryMeasure} over time`,
     });
   }
 
-  // Rule 2: Category + Numeric -> Bar chart
-  if (categoricals.length > 0 && numerics.length > 0) {
+  // Recommendation 2: Bar Chart (Text column with <= 12 distinct values + Measure)
+  const barCat =
+    categoricals.find((c) => c.distinctCount <= 12 && c.name.toLowerCase() !== "city") ||
+    categoricals.find((c) => c.distinctCount <= 12);
+  if (barCat && measures.length > 0) {
     recommendations.push({
       id: "rec-bar",
-      label: `${numerics[0]} by ${categoricals[0].name}`,
+      label: `${primaryMeasure} by ${barCat.name}`,
       chartType: "bar",
-      xCol: categoricals[0].name,
-      yCol: numerics[0],
+      xCol: barCat.name,
+      yCol: primaryMeasure,
       agg: "sum",
-      reason: "Category + Metric distribution",
+      sort: "desc",
+      reason: `Total ${primaryMeasure} by ${barCat.name}`,
     });
   }
 
-  // Rule 3: Low-cardinality category + Numeric -> Donut / Pie
-  const lowCard = categoricals.find((c) => c.uniqueCount <= 8);
-  if (lowCard && numerics.length > 0) {
+  // Recommendation 3: Donut Chart (Text column with <= 8 distinct values + Measure)
+  const donutCat =
+    categoricals.find((c) => c.distinctCount <= 8 && c.name !== barCat?.name) ||
+    categoricals.find((c) => c.distinctCount <= 8);
+  if (donutCat && measures.length > 0) {
     recommendations.push({
       id: "rec-donut",
-      label: `Share of ${numerics[0]} by ${lowCard.name}`,
+      label: `${primaryMeasure} by ${donutCat.name}`,
       chartType: "donut",
-      xCol: lowCard.name,
-      yCol: numerics[0],
+      xCol: donutCat.name,
+      yCol: primaryMeasure,
       agg: "sum",
-      reason: "Low-cardinality category detected",
+      reason: `Share of ${primaryMeasure} across ${donutCat.name}`,
     });
   }
 
-  // Rule 4: Latitude + Longitude -> Map
-  if (latCol && lonCol) {
-    recommendations.push({
-      id: "rec-map",
-      label: `Geographic Map (${latCol}, ${lonCol})`,
-      chartType: "map",
-      xCol: lonCol,
-      yCol: latCol,
-      agg: "count",
-      reason: "Coordinates detected",
-    });
-  }
-
-  // Rule 5: Single Numeric -> Histogram
-  if (numerics.length > 0) {
+  // Recommendation 4: Histogram of a numeric attribute (like Age)
+  const histAttr = numericAttributes[0]?.name || (measures.length > 1 ? measures[1].name : null);
+  if (histAttr) {
     recommendations.push({
       id: "rec-hist",
-      label: `Distribution of ${numerics[0]}`,
+      label: `Histogram of ${histAttr}`,
       chartType: "histogram",
-      xCol: numerics[0],
+      xCol: histAttr,
       yCol: "",
       agg: "count",
-      reason: "Single numeric frequency",
+      reason: `Frequency distribution of ${histAttr}`,
     });
   }
 
-  // Rule 6: Two Numerics -> Scatter Plot
-  if (numerics.length >= 2) {
+  // Recommendation 5: Scatter (Two measures) - only if < 4
+  if (measures.length >= 2 && recommendations.length < 4) {
     recommendations.push({
       id: "rec-scatter",
-      label: `Correlation: ${numerics[0]} vs ${numerics[1]}`,
+      label: `Correlation: ${measures[0].name} vs ${measures[1].name}`,
       chartType: "scatter",
-      xCol: numerics[0],
-      yCol: numerics[1],
+      xCol: measures[0].name,
+      yCol: measures[1].name,
       agg: "none",
-      reason: "Two numerics detected",
+      reason: `Measure correlation between ${measures[0].name} and ${measures[1].name}`,
     });
   }
 
-  return recommendations;
+  // Recommendation 6: Map - only if valid lat/lon exist and < 4
+  if (latCol && lonCol && recommendations.length < 4) {
+    recommendations.push({
+      id: "rec-map",
+      label: `Geographic Map (${latCol.name}, ${lonCol.name})`,
+      chartType: "map",
+      xCol: lonCol.name,
+      yCol: latCol.name,
+      agg: "count",
+      reason: "Coordinates distribution",
+    });
+  }
+
+  return recommendations.slice(0, 4);
 }
 
 export function generateAutoDashboardPage(columns = [], existingPages = []) {
-  const dates = [];
-  const numerics = [];
+  const classified = (columns || []).map(classifyColumn);
+  const measures = classified.filter((c) => c.group === "NUMERICAL" && c.isMeasure);
+  const numericAttributes = classified.filter((c) => c.group === "NUMERICAL" && !c.isMeasure);
+  const dates = classified.filter((c) => c.group === "DATE");
   const categoricals = [];
-  let latCol = null;
-  let lonCol = null;
-
-  (columns || []).forEach((col) => {
-    const name = typeof col === "string" ? col : col.name;
-    const inferred = (col.inferred_type || col.dtype || "").toLowerCase();
-    const nameLower = name.toLowerCase();
-
-    // Ignore flags and IDs
-    if (nameLower.endsWith("_outlier") || nameLower.includes("_flag_") || nameLower.startsWith("is_")) return;
-    if (nameLower === "id" || nameLower.endsWith("_id")) return;
-
-    if (nameLower.includes("lat")) latCol = name;
-    else if (nameLower.includes("lon") || nameLower.includes("lng")) lonCol = name;
-
-    if (inferred.includes("date") || inferred.includes("time") || nameLower.includes("date") || nameLower.includes("year")) {
-      dates.push(name);
-    } else if (inferred.includes("int") || inferred.includes("float") || inferred.includes("numeric") || col.numeric_stats) {
-      numerics.push(name);
-    } else {
-      categoricals.push(name);
+  (columns || []).forEach((rawCol) => {
+    const info = classifyColumn(rawCol);
+    if (info.group === "TEXT" && info.subType !== "Identifier") {
+      const distinctCount = rawCol.unique_count ?? (rawCol.sample_values ? new Set(rawCol.sample_values).size : 5);
+      categoricals.push({ ...info, distinctCount });
     }
   });
+
+  const latCol = classified.find((c) => /^lat(itude)?$/i.test(c.name));
+  const lonCol = classified.find((c) => /^(lon|lng|longitude)$/i.test(c.name));
 
   const tiles = [];
   let zIndex = 1;
 
-  const primaryCol = numerics[0] || categoricals[0] || "ID";
+  const primaryMeasure = measures[0]?.name || "Amount";
+  const secondaryMeasure = measures[1]?.name || null;
+  const numAttr = numericAttributes[0]?.name || null;
 
   // 1. Top Row: 3 KPI Cards (y: 10, h: 120)
   // KPI 1: Total Records
@@ -165,64 +158,67 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
       h: 120,
       z: zIndex++,
       title: "Total Records",
-      chartConfig: { chartType: "kpi", xCol: primaryCol, yCol: primaryCol, agg: "count" },
+      chartConfig: { chartType: "kpi", xCol: primaryMeasure, yCol: primaryMeasure, agg: "count" },
     })
   );
 
-  // KPI 2: Primary Numeric
-  if (numerics.length > 0) {
+  // KPI 2: Primary Measure (Amount)
+  if (primaryMeasure) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: 430, y: 10 },
         w: 410,
         h: 120,
         z: zIndex++,
-        title: `Total ${numerics[0]}`,
-        chartConfig: { chartType: "kpi", xCol: numerics[0], yCol: numerics[0], agg: "sum" },
+        title: `Total ${primaryMeasure}`,
+        chartConfig: { chartType: "kpi", xCol: primaryMeasure, yCol: primaryMeasure, agg: "sum" },
       })
     );
   }
 
-  // KPI 3: Secondary Numeric (Average) or Category Count
-  if (numerics.length > 1) {
+  // KPI 3: Secondary Measure (Quantity) or Average Numeric Attribute (Age)
+  if (secondaryMeasure) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: 860, y: 10 },
         w: 410,
         h: 120,
         z: zIndex++,
-        title: `Average ${numerics[1]}`,
-        chartConfig: { chartType: "kpi", xCol: numerics[1], yCol: numerics[1], agg: "avg" },
+        title: `Total ${secondaryMeasure}`,
+        chartConfig: { chartType: "kpi", xCol: secondaryMeasure, yCol: secondaryMeasure, agg: "sum" },
       })
     );
-  } else if (numerics.length > 0) {
+  } else if (numAttr) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: 860, y: 10 },
         w: 410,
         h: 120,
         z: zIndex++,
-        title: `Max ${numerics[0]}`,
-        chartConfig: { chartType: "kpi", xCol: numerics[0], yCol: numerics[0], agg: "max" },
+        title: `Average ${numAttr}`,
+        chartConfig: { chartType: "kpi", xCol: numAttr, yCol: numAttr, agg: "avg" },
       })
     );
   }
 
   // 2. Middle Row: Trend Line + Category Bar (y: 140, h: 270)
-  if (dates.length > 0 && numerics.length > 0) {
+  if (dates.length > 0 && primaryMeasure) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: 10, y: 140 },
         w: 630,
         h: 270,
         z: zIndex++,
-        title: `${numerics[0]} Trend Over Time`,
-        chartConfig: { chartType: "line", xCol: dates[0], yCol: numerics[0], agg: "sum" },
+        title: `${primaryMeasure} by ${dates[0].name} (month)`,
+        chartConfig: { chartType: "line", xCol: dates[0].name, yCol: primaryMeasure, agg: "sum", dateGrain: "month" },
       })
     );
   }
 
-  if (categoricals.length > 0 && numerics.length > 0) {
+  const barCat =
+    categoricals.find((c) => c.distinctCount <= 12 && c.name.toLowerCase() !== "city") ||
+    categoricals.find((c) => c.distinctCount <= 12);
+  if (barCat && primaryMeasure) {
     const barX = dates.length > 0 ? 660 : 10;
     const barW = dates.length > 0 ? 610 : 1260;
     tiles.push(
@@ -231,30 +227,44 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
         w: barW,
         h: 270,
         z: zIndex++,
-        title: `${numerics[0]} by ${categoricals[0]}`,
-        chartConfig: { chartType: "bar", xCol: categoricals[0], yCol: numerics[0], agg: "sum", sort: "desc" },
+        title: `${primaryMeasure} by ${barCat.name}`,
+        chartConfig: { chartType: "bar", xCol: barCat.name, yCol: primaryMeasure, agg: "sum", sort: "desc" },
       })
     );
   }
 
-  // 3. Bottom Row: Donut Chart + Table or Map (y: 420, h: 290)
-  if (categoricals.length > 1 && numerics.length > 0) {
+  // 3. Bottom Row: Donut Chart + Histogram or Map (y: 420, h: 290)
+  const donutCat =
+    categoricals.find((c) => c.distinctCount <= 8 && c.name !== barCat?.name) ||
+    categoricals.find((c) => c.distinctCount <= 8);
+  if (donutCat && primaryMeasure) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: 10, y: 420 },
         w: 440,
         h: 290,
         z: zIndex++,
-        title: `Share by ${categoricals[1]}`,
-        chartConfig: { chartType: "donut", xCol: categoricals[1], yCol: numerics[0], agg: "sum" },
+        title: `${primaryMeasure} by ${donutCat.name}`,
+        chartConfig: { chartType: "donut", xCol: donutCat.name, yCol: primaryMeasure, agg: "sum" },
       })
     );
   }
 
-  const rightVisualX = categoricals.length > 1 ? 470 : 10;
-  const rightVisualW = categoricals.length > 1 ? 800 : 1260;
+  const rightVisualX = donutCat ? 470 : 10;
+  const rightVisualW = donutCat ? 800 : 1260;
 
-  if (latCol && lonCol) {
+  if (numAttr) {
+    tiles.push(
+      createDefaultTile("chart", {
+        spot: { x: rightVisualX, y: 420 },
+        w: rightVisualW,
+        h: 290,
+        z: zIndex++,
+        title: `Histogram of ${numAttr}`,
+        chartConfig: { chartType: "histogram", xCol: numAttr, yCol: "", agg: "count" },
+      })
+    );
+  } else if (latCol && lonCol) {
     tiles.push(
       createDefaultTile("chart", {
         spot: { x: rightVisualX, y: 420 },
@@ -262,24 +272,12 @@ export function generateAutoDashboardPage(columns = [], existingPages = []) {
         h: 290,
         z: zIndex++,
         title: "Geographic Distribution",
-        chartConfig: { chartType: "map", xCol: lonCol, yCol: latCol, agg: "count" },
-      })
-    );
-  } else {
-    // Table visual
-    tiles.push(
-      createDefaultTile("chart", {
-        spot: { x: rightVisualX, y: 420 },
-        w: rightVisualW,
-        h: 290,
-        z: zIndex++,
-        title: "Data Table",
-        chartConfig: { chartType: "table", xCol: categoricals[0] || primaryCol, yCol: numerics[0] || "", agg: "count" },
+        chartConfig: { chartType: "map", xCol: lonCol.name, yCol: latCol.name, agg: "count" },
       })
     );
   }
 
-  // Auto Dashboard page name (increments if exists)
+  // Auto Dashboard page name
   let baseName = "Auto Dashboard";
   let pageName = baseName;
   let counter = 2;

@@ -20,7 +20,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 | STEP 2 | f7aab4d | viz-fix: canvas scale + zoom + visibility |
 | STEP 3 | c331355 | viz-fix: top bar |
 | STEP 4 | fdd8250 | viz-fix: selection + data assignment |
-| STEP 5 | - | viz-fix: column classification |
+| STEP 5 | 6f77688 | viz-fix: column classification |
 | STEP 6 | - | viz-fix: recommendations |
 
 ## Diagnostic Findings (STEP 0)
