@@ -9,7 +9,46 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 - [x] STEP 3: BIGGER, RESIZABLE PAGES (P4)
 - [x] STEP 4: NEW DRAG/RESIZE ENGINE (P1)
 - [x] STEP 5: LIGHT / DARK THEME (P3)
-- [ ] STEP 6 / VERIFY: Real evidence & screenshots
+- [x] STEP 6 / VERIFY: Real evidence & screenshots
+
+## Verification Results (STEP 6)
+All 5 problem areas (P1-P5) and regression checks verified with real headless Chromium testing on `messy_project_testing_dataset_120_rows_cleaned.csv` (116 rows, 17 columns):
+
+1. **P1 (Freeform Drag & Resize Engine)**: **DONE**
+   - Tile coordinates before drag: `(x: 0, y: 0, w: 640, h: 360)`.
+   - Tile coordinates after pointer drag: `(x: 200, y: 140, w: 640, h: 360)`.
+   - Keyboard nudge (ArrowRight x2, ArrowDown x1): moved cleanly to `(x: 240, y: 160)`.
+   - 8-handle resize: hit-tested `.rpt-resize-handle.handle-se`, resized smoothly to `(w: 760, h: 440)`.
+   - Undo (`Ctrl+Z`): restored state reliably back to `(x: 240, y: 160)`.
+   - View Mode protection: attempting drag in View mode leaves position locked at `(x: 240, y: 160)` and raises guidance toast.
+
+2. **P2 (Data Fields Always Visible)**: **DONE**
+   - Left panel rebuilt with 3 collapsible accordion sections.
+   - Dedicated scroll container ensures Data Fields section is always visible (12 fields immediately rendered with search filter).
+
+3. **P3 (Light / Dark Theme)**: **DONE**
+   - Sun/Moon button in TopBar toggles cleanly between `'light'` and `'dark'`.
+   - `Ctrl+Shift+T` keyboard shortcut toggles theme immediately.
+   - Theme persists across page reloads via `localStorage` (`datalyst_viz_theme`).
+   - Export menu includes "Export theme: Current | Light | Dark".
+
+4. **P4 (Bigger, Resizable Canvas)**: **DONE**
+   - Canvas default set to 1920×1080 (16:9).
+   - Presets supported: 1920×1080, 1280×720, 2560×1440, 1080×1920 (mobile/portrait), 1080×1080 (square).
+   - 6 full-sized charts placed on canvas simultaneously with zero overlap.
+   - Zoom controls (`fitWidth`, `fitPage`, 50%-200%) scale with ratio preservation.
+
+5. **P5 (True Full-Screen Layout)**: **DONE**
+   - Fixed viewport container pinned from under `.tab-switcher` to window bottom (`inset: 107px 0 0 0; width: 100vw;`).
+   - At 1920×1080: `bodyScrollHeight: 1080, windowInnerHeight: 1080` (zero page scroll), `pageTabsVisible: true`, `exportVisible: true`.
+   - At 1366×768: `bodyScrollHeight: 768, windowInnerHeight: 768` (zero page scroll), `tabsVisible: true`, `exportVisible: true`.
+   - True Fullscreen button (`⛶`) expands workspace to 100vw × 100vh overlay.
+
+6. **Regressions Checked**:
+   - Landing page animated background present and active (`.datastream-bg`, binary stream, tech grid).
+   - Chat floating bubble has `z-index: 1000`, above Visualize workspace (`z-index: 40`).
+   - Switching between Clean tab and Visualize tab keeps all 6 tiles intact.
+   - Zero changes to `frontend/src/App.css` (`git diff --stat frontend/src/App.css` is empty).
 
 ## Diagnostic Findings (STEP 0)
 - **a) Edit vs View Mode**: Mode defaults to `"edit"` in initial dashboard state (`utils.js`), toggled via pills in `TopBar.jsx`. However, there is no explicit visual badge indicating the current mode, and in View mode interactions simply fail silently without explanation toast.
