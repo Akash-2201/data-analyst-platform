@@ -44,6 +44,10 @@
   transition: transform 0.2s ease, width 0.2s ease;
 }
 
+.rpt-left-panel.collapsed {
+  display: none !important;
+}
+
 .rpt-panel-header {
   padding: 12px 14px;
   font-size: 11px;
@@ -89,28 +93,46 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  z-index: 15;
+  padding: 0 12px;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+  z-index: 25;
 }
 
-.rpt-topbar-left,
-.rpt-topbar-center,
-.rpt-topbar-right {
+.rpt-topbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.rpt-dash-name-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 100px;
+  max-width: 240px;
+  flex: 0 1 180px;
+  overflow: hidden;
 }
 
 .rpt-dash-name-input {
   background: transparent;
   border: 1px solid transparent;
   color: #f4f4f5;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  padding: 4px 8px;
+  padding: 4px 6px;
   border-radius: 4px;
+  width: 100%;
   max-width: 240px;
+  min-width: 100px;
   outline: none;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
   transition: border-color 0.15s;
 }
 
@@ -118,6 +140,45 @@
 .rpt-dash-name-input:focus {
   background: #18181b;
   border-color: #3f3f46;
+}
+
+.rpt-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.rpt-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.rpt-toggle-panel-btn {
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Secondary label responsiveness */
+@media (max-width: 1400px) {
+  .rpt-btn-label-secondary {
+    display: none !important;
+  }
+  .rpt-save-status {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .rpt-btn-label {
+    display: none !important;
+  }
+  .rpt-dash-name-wrap {
+    max-width: 130px;
+  }
 }
 
 .rpt-btn {
@@ -403,6 +464,10 @@
   overflow-x: hidden;
   z-index: 20;
   transition: transform 0.2s ease, width 0.2s ease;
+}
+
+.rpt-right-panel.collapsed {
+  display: none !important;
 }
 
 .rpt-right-panel-tabs {

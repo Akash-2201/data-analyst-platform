@@ -61,39 +61,41 @@ export function TopBar({
 
   return (
     <header className="rpt-topbar">
-      {/* Left: Mobile drawer toggles + Editable Title */}
+      {/* Left: Toggle left panel + Editable Title + Save + Undo/Redo */}
       <div className="rpt-topbar-left">
         {toggleLeftDrawer && (
           <button
             type="button"
-            className="rpt-btn rpt-mobile-drawer-toggle"
+            className="rpt-btn rpt-toggle-panel-btn"
             onClick={toggleLeftDrawer}
-            title="Toggle Visualizations & Fields"
+            title="Toggle Visualizations & Fields (Left Panel)"
           >
-            ☰ Left
+            ☰
           </button>
         )}
 
-        {isEditingName ? (
-          <input
-            type="text"
-            className="rpt-dash-name-input"
-            value={nameVal}
-            onChange={(e) => setNameVal(e.target.value)}
-            onBlur={handleNameBlur}
-            onKeyDown={handleNameKeyDown}
-            autoFocus
-          />
-        ) : (
-          <span
-            className="rpt-dash-name-input"
-            onClick={() => setIsEditingName(true)}
-            title="Click to rename dashboard"
-            style={{ cursor: "pointer" }}
-          >
-            {present.name || "Untitled Dashboard"}
-          </span>
-        )}
+        <div className="rpt-dash-name-wrap">
+          {isEditingName ? (
+            <input
+              type="text"
+              className="rpt-dash-name-input"
+              value={nameVal}
+              onChange={(e) => setNameVal(e.target.value)}
+              onBlur={handleNameBlur}
+              onKeyDown={handleNameKeyDown}
+              autoFocus
+            />
+          ) : (
+            <span
+              className="rpt-dash-name-input"
+              onClick={() => setIsEditingName(true)}
+              title="Click to rename dashboard"
+              style={{ cursor: "pointer" }}
+            >
+              {present.name || "Untitled Dashboard"}
+            </span>
+          )}
+        </div>
 
         <button
           type="button"
@@ -102,17 +104,15 @@ export function TopBar({
           disabled={isSaving}
           title="Save dashboard to local storage"
         >
-          {isSaving ? "Saving..." : "Save"}
+          <span className="rpt-btn-icon">💾</span>
+          <span className="rpt-btn-label"> Save</span>
         </button>
         {saveTime && (
           <span className="rpt-save-status">
-            Saved at {saveTime}
+            Saved {saveTime}
           </span>
         )}
-      </div>
 
-      {/* Center: Undo, Redo, Edit / View Mode Toggle */}
-      <div className="rpt-topbar-center">
         <button
           type="button"
           className="rpt-btn"
@@ -120,7 +120,8 @@ export function TopBar({
           onClick={() => dispatch({ type: "UNDO" })}
           title="Undo (Ctrl+Z)"
         >
-          ↩ Undo
+          <span className="rpt-btn-icon">↩</span>
+          <span className="rpt-btn-label-secondary"> Undo</span>
         </button>
         <button
           type="button"
@@ -129,21 +130,13 @@ export function TopBar({
           onClick={() => dispatch({ type: "REDO" })}
           title="Redo (Ctrl+Y)"
         >
-          ↪ Redo
+          <span className="rpt-btn-icon">↪</span>
+          <span className="rpt-btn-label-secondary"> Redo</span>
         </button>
+      </div>
 
-        {present.mode === "edit" && (
-          <button
-            type="button"
-            className="rpt-btn"
-            disabled={!present.clipboard || present.clipboard.length === 0}
-            onClick={() => dispatch({ type: "PASTE_TILES" })}
-            title="Paste (Ctrl+V)"
-          >
-            📋 Paste {present.clipboard?.length ? `(${present.clipboard.length})` : ""}
-          </button>
-        )}
-
+      {/* Center: Edit / View Mode Toggle (+ Paste, Snap, Grid in edit mode) */}
+      <div className="rpt-topbar-center">
         <div className="rpt-mode-toggle">
           <button
             type="button"
@@ -162,7 +155,18 @@ export function TopBar({
         </div>
 
         {present.mode === "edit" && (
-          <div style={{ display: "inline-flex", gap: 4, marginLeft: 4 }}>
+          <>
+            <button
+              type="button"
+              className="rpt-btn"
+              disabled={!present.clipboard || present.clipboard.length === 0}
+              onClick={() => dispatch({ type: "PASTE_TILES" })}
+              title="Paste (Ctrl+V)"
+            >
+              <span className="rpt-btn-icon">📋</span>
+              <span className="rpt-btn-label-secondary"> Paste{present.clipboard?.length ? ` (${present.clipboard.length})` : ""}</span>
+            </button>
+
             <button
               type="button"
               className={`rpt-btn ${present.settings?.snap ? "rpt-btn-primary" : ""}`}
@@ -173,10 +177,11 @@ export function TopBar({
                 })
               }
               title="Toggle Snap to Grid (20px vs 4px)"
-              style={{ fontSize: 11, padding: "4px 8px" }}
             >
-              🧲 Snap {present.settings?.snap ? "ON" : "OFF"}
+              <span className="rpt-btn-icon">🧲</span>
+              <span className="rpt-btn-label-secondary"> Snap</span>
             </button>
+
             <button
               type="button"
               className={`rpt-btn ${present.settings?.showGrid ? "rpt-btn-primary" : ""}`}
@@ -187,23 +192,24 @@ export function TopBar({
                 })
               }
               title="Toggle Grid Dots"
-              style={{ fontSize: 11, padding: "4px 8px" }}
             >
-              ▦ Grid
+              <span className="rpt-btn-icon">▦</span>
+              <span className="rpt-btn-label-secondary"> Grid</span>
             </button>
-          </div>
+          </>
         )}
       </div>
 
-      {/* Right: Generate Dashboard + Export Menu + Right drawer toggle */}
+      {/* Right: Generate (renamed from Generate Dashboard) + Export Menu + Right drawer toggle */}
       <div className="rpt-topbar-right">
         <button
           type="button"
           className="rpt-btn rpt-btn-primary"
           onClick={onGenerateDashboard}
-          title="Auto-create recommended dashboard page"
+          title="Generate Dashboard"
         >
-          ✨ Generate Dashboard
+          <span className="rpt-btn-icon">✨</span>
+          <span className="rpt-btn-label"> Generate</span>
         </button>
 
         <div className="rpt-export-wrapper" style={{ position: "relative" }} ref={exportMenuRef}>
@@ -299,11 +305,11 @@ export function TopBar({
         {toggleRightDrawer && (
           <button
             type="button"
-            className="rpt-btn rpt-mobile-drawer-toggle"
+            className="rpt-btn rpt-toggle-panel-btn"
             onClick={toggleRightDrawer}
-            title="Toggle Format & Filter Panel"
+            title="Toggle Format & Data (Right Panel)"
           >
-            Right ☰
+            ▤
           </button>
         )}
       </div>

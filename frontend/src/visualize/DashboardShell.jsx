@@ -58,6 +58,8 @@ export function DashboardShell({
   const [exportProgress, setExportProgress] = useState(null);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
+  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const canvasRef = useRef(null);
   const rootRef = useRef(null);
   const [rootHeight, setRootHeight] = useState(null);
@@ -221,6 +223,7 @@ export function DashboardShell({
         <LeftPanel
           columns={columns}
           isOpen={leftDrawerOpen}
+          isCollapsed={!leftPanelVisible}
         />
 
         {/* CENTER WORKSPACE */}
@@ -254,8 +257,20 @@ export function DashboardShell({
             onExportPdf={onExportPdf || handleExportPdf}
             onExportPng={onExportPng || handleExportPng}
             onExportCsv={onExportCsv || handleExportCsv}
-            toggleLeftDrawer={() => setLeftDrawerOpen(!leftDrawerOpen)}
-            toggleRightDrawer={() => setRightDrawerOpen(!rightDrawerOpen)}
+            toggleLeftDrawer={() => {
+              if (window.innerWidth <= 768) {
+                setLeftDrawerOpen(!leftDrawerOpen);
+              } else {
+                setLeftPanelVisible(!leftPanelVisible);
+              }
+            }}
+            toggleRightDrawer={() => {
+              if (window.innerWidth <= 768) {
+                setRightDrawerOpen(!rightDrawerOpen);
+              } else {
+                setRightPanelVisible(!rightPanelVisible);
+              }
+            }}
           />
 
           <Canvas
@@ -272,6 +287,7 @@ export function DashboardShell({
         <RightPanel
           columns={columns}
           isOpen={rightDrawerOpen}
+          isCollapsed={!rightPanelVisible}
         />
       </div>
     </DashboardProvider>

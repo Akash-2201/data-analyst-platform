@@ -12,7 +12,7 @@ import {
 import { createDefaultTile, findFirstFreeSpot } from "./utils";
 import { getSmartRecommendations } from "./autoDashboard";
 
-export function LeftPanel({ columns = [], isOpen = false }) {
+export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false }) {
   const { state, dispatch } = useDashboard();
   const { present } = state;
   const { activePageId, pages, mode, selectedTileIds } = present;
@@ -164,7 +164,7 @@ export function LeftPanel({ columns = [], isOpen = false }) {
   };
 
   return (
-    <aside className={`rpt-left-panel ${isOpen ? "drawer-open" : ""}`}>
+    <aside className={`rpt-left-panel ${isOpen ? "drawer-open" : ""} ${isCollapsed ? "collapsed" : ""}`}>
       {/* Visualizations Header */}
       <div className="rpt-panel-header">
         <span>Visualizations</span>

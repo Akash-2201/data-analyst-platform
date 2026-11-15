@@ -8,7 +8,7 @@ import { useDashboard } from "./dashboardContext";
 import { PALETTES } from "./constants";
 import { FilterTab } from "./FilterTab";
 
-export function RightPanel({ columns = [], isOpen = false }) {
+export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }) {
   const { state, dispatch } = useDashboard();
   const { present } = state;
   const { activePageId, pages, selectedTileIds, mode } = present;
@@ -42,7 +42,7 @@ export function RightPanel({ columns = [], isOpen = false }) {
   const colNames = (columns || []).map((c) => (typeof c === "string" ? c : c.name));
 
   return (
-    <aside className={`rpt-right-panel ${isOpen ? "drawer-open" : ""}`}>
+    <aside className={`rpt-right-panel ${isOpen ? "drawer-open" : ""} ${isCollapsed ? "collapsed" : ""}`}>
       {/* Tab Navigation */}
       <div className="rpt-right-panel-tabs">
         <button
