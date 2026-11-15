@@ -10,9 +10,10 @@
 .rpt-dashboard-root {
   display: flex;
   flex-direction: row;
-  width: 100%;
-  height: calc(100vh - 60px);
-  min-height: 600px;
+  width: calc(100vw - 40px);
+  margin-left: calc(50% - 50vw + 20px);
+  max-width: calc(100vw - 40px);
+  min-height: 560px;
   background-color: #09090b;
   color: #f4f4f5;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
