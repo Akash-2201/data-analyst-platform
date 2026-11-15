@@ -17,6 +17,10 @@ export function TopBar({
   onExportCsv,
   toggleLeftDrawer,
   toggleRightDrawer,
+  isFullscreen = false,
+  onToggleFullscreen,
+  theme = "dark",
+  onToggleTheme,
 }) {
   const { state, dispatch } = useDashboard();
   const { present, past, future } = state;
@@ -301,6 +305,18 @@ export function TopBar({
             </div>
           )}
         </div>
+
+        {onToggleFullscreen && (
+          <button
+            type="button"
+            className="rpt-btn"
+            onClick={onToggleFullscreen}
+            title={isFullscreen ? "Exit Fullscreen (Esc)" : "Fullscreen Workspace"}
+          >
+            <span>{isFullscreen ? "🗗" : "⛶"}</span>
+            <span className="rpt-btn-label-secondary">{isFullscreen ? "Exit" : "Full"}</span>
+          </button>
+        )}
 
         {toggleRightDrawer && (
           <button

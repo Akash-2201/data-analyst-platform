@@ -51,19 +51,18 @@
 .rpt-dashboard-root {
   display: flex;
   flex-direction: row;
-  width: 100%;
-  height: 100%;
-  flex: 1 1 0%;
-  min-height: 0;
-  max-width: 100%;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: 100vw;
   background-color: #09090b;
   color: #f4f4f5;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   overflow: hidden;
-  position: relative;
   box-sizing: border-box;
-  border: 1px solid #27272a;
-  border-radius: 8px;
+  border-top: 1px solid #27272a;
 }
 
 .rpt-dashboard-root * {
@@ -71,21 +70,20 @@
 }
 
 /* --------------------------------------------------------------------------
-   Left Panel (260px)
+   Left Panel (240px)
    -------------------------------------------------------------------------- */
 .rpt-left-panel {
-  width: 260px;
-  min-width: 260px;
-  max-width: 260px;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
   background-color: #121215;
   border-right: 1px solid #27272a;
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   z-index: 20;
-  transition: transform 0.2s ease, width 0.2s ease;
+  transition: width 0.15s ease;
 }
 
 .rpt-left-panel.collapsed {
@@ -306,7 +304,7 @@
   min-height: 0;
   overflow: auto;
   display: flex;
-  padding: 24px;
+  padding: 8px;
   background-color: #0c0c0e;
   position: relative;
 }
@@ -493,12 +491,12 @@
 }
 
 /* --------------------------------------------------------------------------
-   Right Panel (300px)
+   Right Panel (280px)
    -------------------------------------------------------------------------- */
 .rpt-right-panel {
-  width: 300px;
-  min-width: 300px;
-  max-width: 300px;
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
   background-color: #121215;
   border-left: 1px solid #27272a;
   display: flex;
@@ -507,7 +505,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 20;
-  transition: transform 0.2s ease, width 0.2s ease;
+  transition: width 0.15s ease;
 }
 
 .rpt-right-panel.collapsed {
