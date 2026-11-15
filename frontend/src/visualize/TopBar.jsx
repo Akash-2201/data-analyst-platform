@@ -350,7 +350,7 @@ export function TopBar({
         <button
           type="button"
           className="rpt-btn rpt-theme-toggle-btn"
-          onClick={onToggleTheme}
+          onClick={() => onToggleTheme?.()}
           title={`Switch to ${theme === "light" ? "dark" : "light"} theme (Ctrl+Shift+T)`}
           aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}
         >

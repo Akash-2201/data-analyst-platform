@@ -171,7 +171,18 @@ export function Canvas({
       startPositions: startMap,
       primaryTileId: tile.id,
       rafId: null,
+      latestDraft: null,
     };
+
+    const onTileMove = (moveEvt) => handleTilePointerMove(moveEvt);
+    const onTileUp = (upEvt) => {
+      window.removeEventListener("pointermove", onTileMove);
+      window.removeEventListener("pointerup", onTileUp);
+      handleTilePointerUp(upEvt);
+    };
+
+    window.addEventListener("pointermove", onTileMove);
+    window.addEventListener("pointerup", onTileUp);
   };
 
   const handleTilePointerMove = (e) => {
@@ -219,6 +230,8 @@ export function Canvas({
       });
     }
 
+    gestureRef.current.latestDraft = nextDraft;
+
     if (g.rafId) cancelAnimationFrame(g.rafId);
     g.rafId = requestAnimationFrame(() => {
       setDraftPositions(nextDraft);
@@ -233,9 +246,10 @@ export function Canvas({
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
 
-    if (g.hasMoved && draftPositions) {
+    const finalDraft = gestureRef.current.latestDraft || draftPositions;
+    if (g.hasMoved && finalDraft) {
       const updates = [];
-      draftPositions.forEach((pos, tileId) => {
+      finalDraft.forEach((pos, tileId) => {
         updates.push({ tileId, ...pos });
       });
       if (updates.length > 0) {
@@ -248,6 +262,7 @@ export function Canvas({
 
     if (g.rafId) cancelAnimationFrame(g.rafId);
     gestureRef.current.active = false;
+    gestureRef.current.latestDraft = null;
     setDraftPositions(null);
     setLiveBadge(null);
   };
@@ -275,7 +290,18 @@ export function Canvas({
       startPositions: startMap,
       primaryTileId: tile.id,
       rafId: null,
+      latestDraft: null,
     };
+
+    const onResizeMove = (moveEvt) => handleResizePointerMove(moveEvt);
+    const onResizeUp = (upEvt) => {
+      window.removeEventListener("pointermove", onResizeMove);
+      window.removeEventListener("pointerup", onResizeUp);
+      handleResizePointerUp(upEvt);
+    };
+
+    window.addEventListener("pointermove", onResizeMove);
+    window.addEventListener("pointerup", onResizeUp);
   };
 
   const handleResizePointerMove = (e) => {
@@ -340,6 +366,8 @@ export function Canvas({
       y: e.clientY - 28,
     });
 
+    gestureRef.current.latestDraft = nextDraft;
+
     if (g.rafId) cancelAnimationFrame(g.rafId);
     g.rafId = requestAnimationFrame(() => {
       setDraftPositions(nextDraft);
@@ -354,8 +382,9 @@ export function Canvas({
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
 
-    if (g.hasMoved && draftPositions) {
-      const pos = draftPositions.get(g.primaryTileId);
+    const finalDraft = gestureRef.current.latestDraft || draftPositions;
+    if (g.hasMoved && finalDraft) {
+      const pos = finalDraft.get(g.primaryTileId);
       if (pos) {
         dispatch({
           type: "UPDATE_TILES_LAYOUT",
@@ -366,6 +395,7 @@ export function Canvas({
 
     if (g.rafId) cancelAnimationFrame(g.rafId);
     gestureRef.current.active = false;
+    gestureRef.current.latestDraft = null;
     setDraftPositions(null);
     setLiveBadge(null);
   };

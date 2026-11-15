@@ -111,7 +111,11 @@ export function DashboardShell({
   // Measure top offset relative to document top so fixed workspace starts exactly below navbar/tabs
   const measureTop = useCallback(() => {
     window.scrollTo(0, 0);
-    if (placeholderRef.current) {
+    const tabSwitcher = document.querySelector(".tab-switcher");
+    if (tabSwitcher) {
+      const rect = tabSwitcher.getBoundingClientRect();
+      setWorkspaceTop(Math.max(0, Math.round(rect.bottom)));
+    } else if (placeholderRef.current) {
       const rect = placeholderRef.current.getBoundingClientRect();
       setWorkspaceTop(Math.max(0, Math.round(rect.top)));
     }
@@ -159,7 +163,8 @@ export function DashboardShell({
   const theme = state.present.settings?.theme || "light";
 
   const handleToggleTheme = useCallback((targetTheme) => {
-    const next = targetTheme || (theme === "light" ? "dark" : "light");
+    const validTarget = typeof targetTheme === "string" ? targetTheme : null;
+    const next = validTarget || (theme === "light" ? "dark" : "light");
     try {
       localStorage.setItem("datalyst_viz_theme", next);
     } catch {}
@@ -352,7 +357,6 @@ export function DashboardShell({
           top: isFullscreen ? 0 : `${workspaceTop}px`,
           zIndex: 40,
           width: "100vw",
-          height: isFullscreen ? "100vh" : `calc(100vh - ${workspaceTop}px)`,
         }}
       >
         {/* LEFT PANEL (240px) */}

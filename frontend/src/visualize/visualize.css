@@ -30,7 +30,8 @@
 }
 
 .page.viz-active .filename,
-.page.viz-active .stat-strip {
+.page.viz-active .stat-strip,
+.page.viz-active .masthead {
   display: none !important;
 }
 
