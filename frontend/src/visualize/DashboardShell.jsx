@@ -61,6 +61,9 @@ export function DashboardShell({
   const canvasRef = useRef(null);
   const rootRef = useRef(null);
   const [rootHeight, setRootHeight] = useState(null);
+  const [zoomMode, setZoomMode] = useState("fit"); // "fit" | number
+  const [scale, setScale] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
 
   // Dynamic root height calculation to fill window without page-level scrollbar
   useEffect(() => {
@@ -197,6 +200,14 @@ export function DashboardShell({
     state,
     dispatch,
     activePage: state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0],
+    zoom: {
+      zoomMode,
+      setZoomMode,
+      scale,
+      setScale,
+      fitScale,
+      setFitScale,
+    },
   };
 
   return (

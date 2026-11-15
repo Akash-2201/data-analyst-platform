@@ -8,13 +8,33 @@ import React, { useState } from "react";
 import { useDashboard } from "./dashboardContext";
 
 export function PageTabs() {
-  const { state, dispatch } = useDashboard();
+  const { state, dispatch, zoom } = useDashboard();
   const { present } = state;
   const { pages, activePageId, mode } = present;
+  const { zoomMode, setZoomMode, scale, fitScale } = zoom || {};
 
   const [editingPageId, setEditingPageId] = useState(null);
   const [renameText, setRenameText] = useState("");
   const [draggedIdx, setDraggedIdx] = useState(null);
+  const [showZoomMenu, setShowZoomMenu] = useState(false);
+
+  const ZOOM_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  const handleZoomOut = () => {
+    if (!setZoomMode) return;
+    const cur = zoomMode === "fit" ? (fitScale || 1) : (scale || 1);
+    const lower = ZOOM_PRESETS.filter((p) => p < cur - 0.03);
+    const target = lower.length > 0 ? lower[lower.length - 1] : 0.3;
+    setZoomMode(target);
+  };
+
+  const handleZoomIn = () => {
+    if (!setZoomMode) return;
+    const cur = zoomMode === "fit" ? (fitScale || 1) : (scale || 1);
+    const higher = ZOOM_PRESETS.filter((p) => p > cur + 0.03);
+    const target = higher.length > 0 ? higher[0] : 2.0;
+    setZoomMode(target);
+  };
 
   // In view mode, filter out hidden pages
   const visiblePages = mode === "view" ? pages.filter((p) => !p.hidden) : pages;
@@ -168,6 +188,87 @@ export function PageTabs() {
         >
           + Add Page
         </button>
+      )}
+
+      {/* Zoom Controls */}
+      {zoom && (
+        <div className="rpt-zoom-bar">
+          <button
+            type="button"
+            className="rpt-zoom-btn"
+            onClick={handleZoomOut}
+            title="Zoom Out (Ctrl + Scroll Down)"
+          >
+            －
+          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="rpt-zoom-value"
+              onClick={() => setShowZoomMenu(!showZoomMenu)}
+              title="Click to select zoom preset"
+            >
+              {Math.round((scale || 1) * 100)}%
+            </button>
+            {showZoomMenu && (
+              <div
+                className="rpt-zoom-menu"
+                style={{
+                  position: "absolute",
+                  bottom: 30,
+                  right: 0,
+                  backgroundColor: "#18181b",
+                  border: "1px solid #3f3f46",
+                  borderRadius: 6,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+                  padding: "4px 0",
+                  zIndex: 100,
+                  minWidth: 90,
+                }}
+              >
+                <button
+                  type="button"
+                  className={`rpt-zoom-menu-item ${zoomMode === "fit" ? "active" : ""}`}
+                  onClick={() => {
+                    setZoomMode("fit");
+                    setShowZoomMenu(false);
+                  }}
+                >
+                  Fit to page
+                </button>
+                {ZOOM_PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`rpt-zoom-menu-item ${zoomMode === p ? "active" : ""}`}
+                    onClick={() => {
+                      setZoomMode(p);
+                      setShowZoomMenu(false);
+                    }}
+                  >
+                    {Math.round(p * 100)}%
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="rpt-zoom-btn"
+            onClick={handleZoomIn}
+            title="Zoom In (Ctrl + Scroll Up)"
+          >
+            ＋
+          </button>
+          <button
+            type="button"
+            className={`rpt-zoom-btn ${zoomMode === "fit" ? "active" : ""}`}
+            onClick={() => setZoomMode("fit")}
+            title="Fit to page"
+          >
+            Fit
+          </button>
+        </div>
       )}
     </footer>
   );

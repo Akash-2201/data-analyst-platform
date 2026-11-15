@@ -4,7 +4,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 
 ## Status Overview
 - [x] STEP 0: DIAGNOSE (no edits)
-- [ ] STEP 1: LAYOUT FILLS THE WINDOW (P3)
+- [x] STEP 1: LAYOUT FILLS THE WINDOW (P3)
 - [ ] STEP 2: CANVAS SIZE + ZOOM (P2, P7)
 - [ ] STEP 3: TOP BAR (P4)
 - [ ] STEP 4: SELECTION + DATA ASSIGNMENT (P1)
@@ -16,7 +16,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 ## Commits Log
 | Step | Commit Hash | Description |
 |------|-------------|-------------|
-| STEP 1 | - | viz-fix: layout fills window |
+| STEP 1 | ed60750 | viz-fix: layout fills window |
 | STEP 2 | - | viz-fix: canvas scale + zoom + visibility |
 | STEP 3 | - | viz-fix: top bar |
 | STEP 4 | - | viz-fix: selection + data assignment |

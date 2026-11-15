@@ -201,25 +201,30 @@
   min-height: 0;
   overflow: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 24px;
   background-color: #0c0c0e;
   position: relative;
 }
 
-.rpt-canvas-viewport.grid-dots {
-  background-image: radial-gradient(#27272a 1px, transparent 1px);
-  background-size: 20px 20px;
+.rpt-canvas-outer {
+  position: relative;
+  margin: auto;
+  flex-shrink: 0;
 }
 
 .rpt-canvas-wrapper {
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px #27272a;
-  background-color: #141417;
+  background-color: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
   position: relative;
   overflow: hidden;
   transform-origin: top left;
-  border-radius: 4px;
+}
+
+.rpt-canvas-wrapper.grid-dots {
+  background-image: radial-gradient(#52525b 1.5px, transparent 1.5px);
+  background-size: 20px 20px;
 }
 
 /* Page Tab Bar (Bottom) */
@@ -235,6 +240,82 @@
   overflow-x: auto;
   overflow-y: hidden;
   z-index: 15;
+  flex: 0 0 auto;
+}
+
+.rpt-zoom-bar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background-color: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.rpt-zoom-btn {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.rpt-zoom-btn:hover {
+  background: #27272a;
+  color: #ffffff;
+}
+
+.rpt-zoom-btn.active {
+  background: #8b5cf6;
+  color: #ffffff;
+}
+
+.rpt-zoom-value {
+  background: transparent;
+  border: none;
+  color: #e4e4e7;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 44px;
+  text-align: center;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.rpt-zoom-value:hover {
+  background: #27272a;
+}
+
+.rpt-zoom-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #d4d4d8;
+  font-size: 11px;
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rpt-zoom-menu-item:hover {
+  background: #27272a;
+  color: #ffffff;
+}
+
+.rpt-zoom-menu-item.active {
+  color: #a78bfa;
+  font-weight: 600;
 }
 
 .rpt-page-tab {

@@ -23,13 +23,13 @@ export function Canvas({
   renderTileContent,
   canvasRef,
 }) {
-  const { state, dispatch } = useDashboard();
+  const { state, dispatch, zoom } = useDashboard();
   const { present } = state;
   const { activePageId, pages, mode, settings, selectedTileIds } = present;
   const { snap, showGrid } = settings;
+  const { zoomMode, setZoomMode, scale, setScale, fitScale, setFitScale } = zoom || {};
 
   const viewportRef = useRef(null);
-  const [scale, setScale] = useState(1);
 
   const activePage = useMemo(() => {
     return pages.find((p) => p.id === activePageId) || pages[0];
@@ -38,33 +38,55 @@ export function Canvas({
   const tiles = activePage?.tiles || [];
 
   // Compute transform scale to fit container width & height maintaining 16:9
-  const updateScale = useCallback(() => {
-    if (!viewportRef.current) return;
+  const updateFitScale = useCallback(() => {
+    if (!viewportRef.current || !setFitScale) return;
     const { clientWidth, clientHeight } = viewportRef.current;
     if (clientWidth <= 0 || clientHeight <= 0) return;
-    const pad = 32;
-    const availW = Math.max(100, clientWidth - pad);
-    const availH = Math.max(100, clientHeight - pad);
-    const scaleW = availW / CANVAS_W;
-    const scaleH = availH / CANVAS_H;
-    const newScale = Math.min(scaleW, scaleH, 1.25);
-    setScale(Math.max(0.2, newScale));
-  }, []);
+    const fitW = (clientWidth - 48) / CANVAS_W;
+    const fitH = (clientHeight - 48) / CANVAS_H;
+    const computedFit = Math.min(fitW, fitH);
+    const clampedFit = Math.min(2.0, Math.max(0.3, computedFit));
+    setFitScale(clampedFit);
+  }, [setFitScale]);
 
   useEffect(() => {
-    updateScale();
-    const handleResize = () => updateScale();
+    updateFitScale();
+    const handleResize = () => updateFitScale();
     window.addEventListener("resize", handleResize);
     let ro;
     if (viewportRef.current && window.ResizeObserver) {
-      ro = new ResizeObserver(updateScale);
+      ro = new ResizeObserver(updateFitScale);
       ro.observe(viewportRef.current);
     }
     return () => {
       window.removeEventListener("resize", handleResize);
       if (ro) ro.disconnect();
     };
-  }, [updateScale]);
+  }, [updateFitScale]);
+
+  // Derived effective scale
+  const effectiveScale = zoomMode === "fit" ? (fitScale || 1) : (typeof zoomMode === "number" ? zoomMode : 1);
+
+  useEffect(() => {
+    if (setScale && effectiveScale) {
+      setScale(effectiveScale);
+    }
+  }, [effectiveScale, setScale]);
+
+  // Ctrl + mousewheel zoom
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || !setZoomMode) return;
+    const handleWheel = (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.08 : -0.08;
+      const next = Math.min(2.0, Math.max(0.3, Math.round((effectiveScale + delta) * 100) / 100));
+      setZoomMode(next);
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [effectiveScale, setZoomMode]);
 
   // Grid columns and cell size based on snap setting
   const cell = getGridCell(snap);
@@ -110,21 +132,33 @@ export function Canvas({
   return (
     <div
       ref={viewportRef}
-      className={`rpt-canvas-viewport ${showGrid ? "grid-dots" : ""}`}
+      className="rpt-canvas-viewport"
       onClick={handleCanvasClick}
     >
       <div
-        ref={canvasRef}
-        className="rpt-canvas-wrapper"
+        className="rpt-canvas-outer"
         style={{
-          width: CANVAS_W,
-          height: CANVAS_H,
-          transform: `scale(${scale})`,
-          transformOrigin: "center center",
+          width: Math.round(CANVAS_W * effectiveScale),
+          height: Math.round(CANVAS_H * effectiveScale),
+          margin: "auto",
           position: "relative",
+          flexShrink: 0,
         }}
       >
-        <AlignToolbar />
+        <div
+          ref={canvasRef}
+          className={`rpt-canvas-wrapper ${showGrid && mode === "edit" ? "grid-dots" : ""}`}
+          style={{
+            width: CANVAS_W,
+            height: CANVAS_H,
+            transform: `scale(${effectiveScale})`,
+            transformOrigin: "top left",
+            position: "absolute",
+            top: 0,
+            left: 0,
+          }}
+        >
+          <AlignToolbar />
 
         {/* Active Cross Filter Indicator */}
         {activePage?.crossFilter && (
@@ -189,7 +223,7 @@ export function Canvas({
           isBounded={false}
           isDraggable={mode === "edit"}
           isResizable={mode === "edit"}
-          transformScale={scale}
+          transformScale={effectiveScale}
           draggableCancel=".rpt-no-drag, .rpt-tile-hover-bar, button, input, select, textarea"
           resizeHandles={["se", "sw", "ne", "nw", "e", "w", "n", "s"]}
           onDragStop={handleDragOrResizeStop}
@@ -352,5 +386,6 @@ export function Canvas({
         </ReactGridLayout>
       </div>
     </div>
-  );
+  </div>
+);
 }
