@@ -53,27 +53,27 @@ export function HistogramChartRenderer({
         margin={{ top: 12, right: 16, bottom: 24, left: 0 }}
         barCategoryGap={1}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--rpt-chart-grid, #27272a)" vertical={false} />
         <XAxis
           dataKey="bin"
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={10}
           tickLine={false}
-          tick={{ fill: "#a1a1aa", fontSize: 9 }}
+          tick={{ fill: "var(--rpt-chart-text, #a1a1aa)", fontSize: 9 }}
         />
         <YAxis
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
           axisLine={false}
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#18181b",
-            borderColor: "#3f3f46",
+            backgroundColor: "var(--rpt-tooltip-bg, #18181b)",
+            borderColor: "var(--rpt-border, #3f3f46)",
             borderRadius: 6,
             fontSize: 12,
-            color: "#f4f4f5",
+            color: "var(--rpt-tooltip-text, #f4f4f5)",
           }}
         />
         <Bar

@@ -8,14 +8,28 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { CANVAS_W, CANVAS_H } from "./constants";
 
-export async function exportElementAsPng(element, filename = "dashboard.png") {
+export async function exportElementAsPng(
+  element,
+  filename = "dashboard.png",
+  exportTheme = "current",
+  currentTheme = "light"
+) {
   if (!element) return;
   element.classList.add("rpt-export-clean");
+  const root = element.closest(".rpt-dashboard-root");
+  const origTheme = root?.getAttribute("data-theme") || currentTheme;
+  const targetTheme = exportTheme === "current" ? origTheme : exportTheme;
+
+  if (root && targetTheme !== origTheme) {
+    root.setAttribute("data-theme", targetTheme);
+  }
+
   try {
+    const bgColor = targetTheme === "light" ? "#ffffff" : "#09090b";
     const canvas = await html2canvas(element, {
       scale: 2,
       useCORS: true,
-      backgroundColor: "#09090b",
+      backgroundColor: bgColor,
       logging: false,
     });
     const link = document.createElement("a");
@@ -24,6 +38,9 @@ export async function exportElementAsPng(element, filename = "dashboard.png") {
     link.click();
   } finally {
     element.classList.remove("rpt-export-clean");
+    if (root && targetTheme !== origTheme) {
+      root.setAttribute("data-theme", origTheme);
+    }
   }
 }
 
@@ -32,11 +49,21 @@ export async function exportDashboardPdf({
   datasetFilename = "report",
   onProgress = null,
   canvasRef = null,
+  exportTheme = "current",
+  currentTheme = "light",
 }) {
   const visiblePages = (dashboard?.pages || []).filter((p) => !p.hidden);
   if (visiblePages.length === 0) {
     alert("No visible pages to export.");
     return;
+  }
+
+  const root = canvasRef?.current?.closest(".rpt-dashboard-root");
+  const origTheme = root?.getAttribute("data-theme") || currentTheme;
+  const targetTheme = exportTheme === "current" ? origTheme : exportTheme;
+
+  if (root && targetTheme !== origTheme) {
+    root.setAttribute("data-theme", targetTheme);
   }
 
   const firstPage = visiblePages[0];
@@ -51,52 +78,59 @@ export async function exportDashboardPdf({
   });
 
   const totalPages = visiblePages.length;
+  const bgColor = targetTheme === "light" ? "#ffffff" : "#09090b";
 
-  for (let i = 0; i < totalPages; i++) {
-    const page = visiblePages[i];
-    const pageW = page.size?.w || CANVAS_W;
-    const pageH = page.size?.h || CANVAS_H;
-    const orientation = pageW >= pageH ? "landscape" : "portrait";
+  try {
+    for (let i = 0; i < totalPages; i++) {
+      const page = visiblePages[i];
+      const pageW = page.size?.w || CANVAS_W;
+      const pageH = page.size?.h || CANVAS_H;
+      const orientation = pageW >= pageH ? "landscape" : "portrait";
 
-    if (onProgress) {
-      onProgress(`Exporting page ${i + 1} of ${totalPages}: ${page.name}...`);
-    }
+      if (onProgress) {
+        onProgress(`Exporting page ${i + 1} of ${totalPages}: ${page.name}...`);
+      }
 
-    // Capture the current canvas if it matches active page, or offscreen
-    if (canvasRef && canvasRef.current) {
-      canvasRef.current.classList.add("rpt-export-clean");
-      try {
-        const canvas = await html2canvas(canvasRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#09090b",
-          logging: false,
-        });
+      // Capture the current canvas if it matches active page, or offscreen
+      if (canvasRef && canvasRef.current) {
+        canvasRef.current.classList.add("rpt-export-clean");
+        try {
+          const canvas = await html2canvas(canvasRef.current, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: bgColor,
+            logging: false,
+          });
 
-        const imgData = canvas.toDataURL("image/jpeg", 0.95);
-        if (i > 0) {
-          pdf.addPage([pageW, pageH], orientation);
+          const imgData = canvas.toDataURL("image/jpeg", 0.95);
+          if (i > 0) {
+            pdf.addPage([pageW, pageH], orientation);
+          }
+          pdf.addImage(imgData, "JPEG", 0, 0, pageW, pageH);
+
+          // Add clean page footer
+          pdf.setFontSize(10);
+          pdf.setTextColor(targetTheme === "light" ? 113 : 161, targetTheme === "light" ? 113 : 161, targetTheme === "light" ? 122 : 170);
+          pdf.text(
+            `${page.name} | Page ${i + 1} of ${totalPages}`,
+            pageW / 2,
+            pageH - 12,
+            { align: "center" }
+          );
+        } finally {
+          canvasRef.current.classList.remove("rpt-export-clean");
         }
-        pdf.addImage(imgData, "JPEG", 0, 0, pageW, pageH);
-
-        // Add clean page footer
-        pdf.setFontSize(10);
-        pdf.setTextColor(161, 161, 170); // #a1a1aa
-        pdf.text(
-          `${page.name} | Page ${i + 1} of ${totalPages}`,
-          pageW / 2,
-          pageH - 12,
-          { align: "center" }
-        );
-      } finally {
-        canvasRef.current.classList.remove("rpt-export-clean");
       }
     }
-  }
 
-  const cleanFilename = `${(datasetFilename || "dashboard").replace(/\.[^/.]+$/, "")}_dashboard.pdf`;
-  pdf.save(cleanFilename);
-  if (onProgress) onProgress(null);
+    const cleanFilename = `${(datasetFilename || "dashboard").replace(/\.[^/.]+$/, "")}_dashboard.pdf`;
+    pdf.save(cleanFilename);
+  } finally {
+    if (root && targetTheme !== origTheme) {
+      root.setAttribute("data-theme", origTheme);
+    }
+    if (onProgress) onProgress(null);
+  }
 }
 
 export function exportDataAsCsv(filename = "data.csv", rows = [], headers = []) {

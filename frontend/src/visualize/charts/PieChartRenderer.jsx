@@ -56,14 +56,14 @@ export function PieChartRenderer({
       <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
         <Tooltip
           contentStyle={{
-            backgroundColor: "#18181b",
-            borderColor: "#3f3f46",
+            backgroundColor: "var(--rpt-tooltip-bg, #18181b)",
+            borderColor: "var(--rpt-border, #3f3f46)",
             borderRadius: 6,
             fontSize: 12,
-            color: "#f4f4f5",
+            color: "var(--rpt-tooltip-text, #f4f4f5)",
           }}
         />
-        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />}
+        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "var(--rpt-chart-text, #a1a1aa)" }} />}
         <Pie
           data={chartData}
           dataKey="value"
@@ -87,7 +87,7 @@ export function PieChartRenderer({
                 ? paletteColors[index % paletteColors.length]
                 : "rgba(113, 113, 122, 0.25)"
               : paletteColors[index % paletteColors.length];
-            return <Cell key={`slice-${index}`} fill={sliceFill} stroke="#18181b" strokeWidth={2} />;
+            return <Cell key={`slice-${index}`} fill={sliceFill} stroke="var(--rpt-tile-bg, #18181b)" strokeWidth={2} />;
           })}
         </Pie>
       </PieChart>

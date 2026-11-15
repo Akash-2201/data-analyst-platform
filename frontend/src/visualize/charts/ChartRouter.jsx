@@ -157,7 +157,7 @@ export function ChartRouter({
     case "forecast_residual":
     default:
       return (
-        <div style={{ width: "100%", height: "100%", position: "relative" }}>
+        <div className="rpt-legacy" style={{ width: "100%", height: "100%", position: "relative" }}>
           {renderSharedChart(
             data,
             chartType,

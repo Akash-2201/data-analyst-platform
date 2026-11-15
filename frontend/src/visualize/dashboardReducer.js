@@ -30,6 +30,14 @@ function pushHistory(state, newPresent) {
 }
 
 export function createInitialState(initialDashboard) {
+  const savedTheme = (() => {
+    try {
+      return localStorage.getItem("datalyst_viz_theme") || "light";
+    } catch {
+      return "light";
+    }
+  })();
+
   const migratedPages = (initialDashboard?.pages || []).map((page) => ({
     ...page,
     size: {
@@ -39,10 +47,22 @@ export function createInitialState(initialDashboard) {
     autoGrowHeight: page.autoGrowHeight || false,
   }));
 
+  const initialSettings = {
+    snap: true,
+    showGrid: true,
+    autoAlign: false,
+    theme: savedTheme,
+    ...(initialDashboard?.settings || {}),
+  };
+  if (!initialSettings.theme) {
+    initialSettings.theme = savedTheme;
+  }
+
   return {
     past: [],
     present: {
       ...initialDashboard,
+      settings: initialSettings,
       pages: migratedPages.length > 0 ? migratedPages : [makeEmptyPage("Page 1")],
     },
     future: [],
@@ -97,7 +117,21 @@ export function dashboardReducer(state, action) {
     }
 
     case "SET_SETTINGS": {
+      if (action.payload?.theme) {
+        try {
+          localStorage.setItem("datalyst_viz_theme", action.payload.theme);
+        } catch {}
+      }
       const newPresent = { ...present, settings: { ...present.settings, ...action.payload } };
+      return pushHistory(state, newPresent);
+    }
+
+    case "SET_THEME": {
+      const newTheme = action.payload;
+      try {
+        localStorage.setItem("datalyst_viz_theme", newTheme);
+      } catch {}
+      const newPresent = { ...present, settings: { ...present.settings, theme: newTheme } };
       return pushHistory(state, newPresent);
     }
 

@@ -70,7 +70,7 @@ export function SlicerRenderer({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "10px 14px", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--rpt-muted, #a1a1aa)", textTransform: "uppercase" }}>
           {slicerCol}
         </span>
         {selectedValues.length > 0 && (
@@ -90,9 +90,9 @@ export function SlicerRenderer({
           value={selectedValues.length === 1 ? selectedValues[0] : "__ALL__"}
           onChange={(e) => handleSelectDropdown(e.target.value)}
           style={{
-            background: "#18181b",
-            border: "1px solid #3f3f46",
-            color: "#f4f4f5",
+            background: "var(--rpt-panel-2, #18181b)",
+            border: "1px solid var(--rpt-border, #3f3f46)",
+            color: "var(--rpt-text, #f4f4f5)",
             fontSize: 12,
             padding: "6px 8px",
             borderRadius: 6,
@@ -119,7 +119,7 @@ export function SlicerRenderer({
                   alignItems: "center",
                   gap: 6,
                   fontSize: 11,
-                  color: isChecked ? "#f4f4f5" : "#a1a1aa",
+                  color: isChecked ? "var(--rpt-text, #f4f4f5)" : "var(--rpt-muted, #a1a1aa)",
                   cursor: "pointer",
                 }}
               >
@@ -127,7 +127,7 @@ export function SlicerRenderer({
                   type="checkbox"
                   checked={isChecked}
                   onChange={() => handleToggleCheckbox(String(v))}
-                  style={{ accentColor: "#8b5cf6" }}
+                  style={{ accentColor: "var(--rpt-accent, #8b5cf6)" }}
                 />
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {String(v)}

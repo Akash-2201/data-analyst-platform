@@ -66,10 +66,10 @@ export function BarChartRenderer({
           }
         }}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--rpt-chart-grid, #27272a)" vertical={false} />
         <XAxis
           dataKey="name"
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
           interval={0}
@@ -77,7 +77,7 @@ export function BarChartRenderer({
             <text
               x={x}
               y={y + 10}
-              fill="#a1a1aa"
+              fill="var(--rpt-chart-text, #a1a1aa)"
               fontSize={10}
               textAnchor="middle"
               width={60}
@@ -87,7 +87,7 @@ export function BarChartRenderer({
           )}
         />
         <YAxis
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
           axisLine={false}
@@ -95,15 +95,15 @@ export function BarChartRenderer({
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#18181b",
-            borderColor: "#3f3f46",
+            backgroundColor: "var(--rpt-tooltip-bg, #18181b)",
+            borderColor: "var(--rpt-border, #3f3f46)",
             borderRadius: 6,
             fontSize: 12,
-            color: "#f4f4f5",
+            color: "var(--rpt-tooltip-text, #f4f4f5)",
           }}
           itemStyle={{ color: primaryColor }}
         />
-        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />}
+        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "var(--rpt-chart-text, #a1a1aa)" }} />}
         <Bar
           dataKey="value"
           fill={primaryColor}
@@ -111,7 +111,7 @@ export function BarChartRenderer({
           cursor={isInteractive ? "pointer" : "default"}
         >
           {format.showLabels && (
-            <LabelList dataKey="value" position="top" fill="#a1a1aa" fontSize={10} />
+            <LabelList dataKey="value" position="top" fill="var(--rpt-chart-text, #a1a1aa)" fontSize={10} />
           )}
           {chartData.map((entry, index) => {
             const isMatch = crossFilter ? crossFilter.value === entry.name : true;

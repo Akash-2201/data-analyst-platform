@@ -72,16 +72,16 @@ export function AreaChartRenderer({
             <stop offset="95%" stopColor={primaryColor} stopOpacity={0.0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--rpt-chart-grid, #27272a)" vertical={false} />
         <XAxis
           dataKey="name"
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
-          tick={{ fill: "#a1a1aa", fontSize: 10 }}
+          tick={{ fill: "var(--rpt-chart-text, #a1a1aa)", fontSize: 10 }}
         />
         <YAxis
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
           axisLine={false}
@@ -89,15 +89,15 @@ export function AreaChartRenderer({
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "#18181b",
-            borderColor: "#3f3f46",
+            backgroundColor: "var(--rpt-tooltip-bg, #18181b)",
+            borderColor: "var(--rpt-border, #3f3f46)",
             borderRadius: 6,
             fontSize: 12,
-            color: "#f4f4f5",
+            color: "var(--rpt-tooltip-text, #f4f4f5)",
           }}
           itemStyle={{ color: primaryColor }}
         />
-        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />}
+        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "var(--rpt-chart-text, #a1a1aa)" }} />}
         <Area
           type="monotone"
           dataKey="value"
@@ -108,7 +108,7 @@ export function AreaChartRenderer({
           cursor={isInteractive ? "pointer" : "default"}
         >
           {format.showLabels && (
-            <LabelList dataKey="value" position="top" fill="#a1a1aa" fontSize={10} />
+            <LabelList dataKey="value" position="top" fill="var(--rpt-chart-text, #a1a1aa)" fontSize={10} />
           )}
         </Area>
       </AreaChart>

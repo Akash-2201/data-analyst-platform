@@ -48,6 +48,56 @@
   overflow: hidden !important;
 }
 
+/* --------------------------------------------------------------------------
+   Theme Variables (Dark zinc default, Light zinc toggle)
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  --rpt-bg: #09090b;
+  --rpt-panel: #121215;
+  --rpt-panel-2: #18181b;
+  --rpt-border: #27272a;
+  --rpt-border-subtle: #3f3f46;
+  --rpt-text: #f4f4f5;
+  --rpt-muted: #a1a1aa;
+  --rpt-accent: #8b5cf6;
+  --rpt-accent-2: #10b981;
+  --rpt-page-outer: #0c0c0e;
+  --rpt-page-bg: #18181b;
+  --rpt-tile-bg: #18181b;
+  --rpt-chart-text: #a1a1aa;
+  --rpt-chart-grid: #27272a;
+  --rpt-tooltip-bg: #18181b;
+  --rpt-tooltip-text: #f4f4f5;
+  --rpt-hover: #27272a;
+  --rpt-tile-header: #151518;
+  --rpt-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  --rpt-grid-dot: #52525b;
+}
+
+[data-theme="light"] {
+  --rpt-bg: #f4f4f5;
+  --rpt-panel: #ffffff;
+  --rpt-panel-2: #f4f4f5;
+  --rpt-border: #d4d4d8;
+  --rpt-border-subtle: #e4e4e7;
+  --rpt-text: #09090b;
+  --rpt-muted: #71717a;
+  --rpt-accent: #7c3aed;
+  --rpt-accent-2: #059669;
+  --rpt-page-outer: #e4e4e7;
+  --rpt-page-bg: #ffffff;
+  --rpt-tile-bg: #ffffff;
+  --rpt-chart-text: #27272a;
+  --rpt-chart-grid: #e4e4e7;
+  --rpt-tooltip-bg: #ffffff;
+  --rpt-tooltip-text: #09090b;
+  --rpt-hover: #e4e4e7;
+  --rpt-tile-header: #fafafa;
+  --rpt-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --rpt-grid-dot: #a1a1aa;
+}
+
 .rpt-dashboard-root {
   display: flex;
   flex-direction: row;
@@ -57,16 +107,39 @@
   bottom: 0;
   z-index: 40;
   width: 100vw;
-  background-color: #09090b;
-  color: #f4f4f5;
+  background-color: var(--rpt-bg);
+  color: var(--rpt-text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   overflow: hidden;
   box-sizing: border-box;
-  border-top: 1px solid #27272a;
+  border-top: 1px solid var(--rpt-border);
 }
 
 .rpt-dashboard-root * {
   box-sizing: border-box;
+}
+
+/* Form controls under dashboard */
+.rpt-dashboard-root input,
+.rpt-dashboard-root select,
+.rpt-dashboard-root textarea {
+  background-color: var(--rpt-panel-2) !important;
+  border-color: var(--rpt-border) !important;
+  color: var(--rpt-text) !important;
+}
+
+.rpt-dashboard-root input:focus,
+.rpt-dashboard-root select:focus,
+.rpt-dashboard-root textarea:focus {
+  border-color: var(--rpt-accent) !important;
+}
+
+.rpt-field-item {
+  color: var(--rpt-text) !important;
+}
+
+.rpt-field-item:hover {
+  background-color: var(--rpt-hover) !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -76,8 +149,8 @@
   width: 240px;
   min-width: 240px;
   max-width: 240px;
-  background-color: #121215;
-  border-right: 1px solid #27272a;
+  background-color: var(--rpt-panel);
+  border-right: 1px solid var(--rpt-border);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -96,8 +169,8 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #a1a1aa;
-  border-bottom: 1px solid #27272a;
+  color: var(--rpt-muted);
+  border-bottom: 1px solid var(--rpt-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -106,7 +179,7 @@
 .rpt-section-title {
   font-size: 11px;
   font-weight: 600;
-  color: #71717a;
+  color: var(--rpt-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 10px 14px 4px 14px;
@@ -121,7 +194,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #09090b;
+  background-color: var(--rpt-bg);
   position: relative;
   overflow: hidden;
 }
@@ -130,8 +203,8 @@
 .rpt-topbar {
   height: 48px;
   min-height: 48px;
-  background-color: #121215;
-  border-bottom: 1px solid #27272a;
+  background-color: var(--rpt-panel);
+  border-bottom: 1px solid var(--rpt-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -163,7 +236,7 @@
 .rpt-dash-name-input {
   background: transparent;
   border: 1px solid transparent;
-  color: #f4f4f5;
+  color: var(--rpt-text);
   font-size: 13px;
   font-weight: 600;
   padding: 4px 6px;
@@ -180,8 +253,8 @@
 
 .rpt-dash-name-input:hover,
 .rpt-dash-name-input:focus {
-  background: #18181b;
-  border-color: #3f3f46;
+  background: var(--rpt-panel-2);
+  border-color: var(--rpt-border-subtle);
 }
 
 .rpt-topbar-center {
@@ -224,9 +297,9 @@
 }
 
 .rpt-btn {
-  background-color: #18181b;
-  border: 1px solid #27272a;
-  color: #e4e4e7;
+  background-color: var(--rpt-panel-2);
+  border: 1px solid var(--rpt-border);
+  color: var(--rpt-text);
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
@@ -240,9 +313,9 @@
 }
 
 .rpt-btn:hover:not(:disabled) {
-  background-color: #27272a;
-  color: #fafafa;
-  border-color: #3f3f46;
+  background-color: var(--rpt-hover);
+  color: var(--rpt-text);
+  border-color: var(--rpt-border-subtle);
 }
 
 .rpt-btn:disabled {
@@ -251,9 +324,9 @@
 }
 
 .rpt-btn-primary {
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-  border-color: #8b5cf6;
-  color: #ffffff;
+  background: linear-gradient(135deg, var(--rpt-accent), #7c3aed);
+  border-color: var(--rpt-accent);
+  color: #ffffff !important;
 }
 
 .rpt-btn-primary:hover:not(:disabled) {
@@ -263,8 +336,8 @@
 
 .rpt-mode-toggle {
   display: inline-flex;
-  background-color: #18181b;
-  border: 1px solid #27272a;
+  background-color: var(--rpt-panel-2);
+  border: 1px solid var(--rpt-border);
   border-radius: 6px;
   padding: 2px;
   gap: 2px;
@@ -273,7 +346,7 @@
 .rpt-mode-btn {
   background: transparent;
   border: none;
-  color: #a1a1aa;
+  color: var(--rpt-muted);
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 12px;
@@ -283,18 +356,18 @@
 }
 
 .rpt-mode-btn.active {
-  background-color: #27272a;
-  color: #10b981;
+  background-color: var(--rpt-hover);
+  color: var(--rpt-accent-2);
   font-weight: 600;
 }
 
 .rpt-mode-btn.active.edit {
-  color: #a78bfa;
+  color: var(--rpt-accent);
 }
 
 .rpt-save-status {
   font-size: 11px;
-  color: #71717a;
+  color: var(--rpt-muted);
   margin-left: 4px;
 }
 
@@ -305,7 +378,7 @@
   overflow: auto;
   display: flex;
   padding: 8px;
-  background-color: #0c0c0e;
+  background-color: var(--rpt-page-outer);
   position: relative;
 }
 
@@ -316,17 +389,17 @@
 }
 
 .rpt-canvas-wrapper {
-  background-color: #18181b;
-  border: 1px solid #3f3f46;
+  background-color: var(--rpt-page-bg);
+  border: 1px solid var(--rpt-border);
   border-radius: 4px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--rpt-shadow);
   position: relative;
   overflow: hidden;
   transform-origin: top left;
 }
 
 .rpt-canvas-wrapper.grid-dots {
-  background-image: radial-gradient(#52525b 1.5px, transparent 1.5px);
+  background-image: radial-gradient(var(--rpt-grid-dot) 1.5px, transparent 1.5px);
   background-size: 20px 20px;
 }
 
@@ -334,8 +407,8 @@
 .rpt-page-tabs {
   height: 38px;
   min-height: 38px;
-  background-color: #121215;
-  border-top: 1px solid #27272a;
+  background-color: var(--rpt-panel);
+  border-top: 1px solid var(--rpt-border);
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -351,8 +424,8 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  background-color: #18181b;
-  border: 1px solid #27272a;
+  background-color: var(--rpt-panel-2);
+  border: 1px solid var(--rpt-border);
   border-radius: 6px;
   padding: 2px 4px;
   flex-shrink: 0;
@@ -361,7 +434,7 @@
 .rpt-zoom-btn {
   background: transparent;
   border: none;
-  color: #a1a1aa;
+  color: var(--rpt-muted);
   font-size: 11px;
   font-weight: 500;
   padding: 2px 6px;
@@ -372,19 +445,19 @@
 }
 
 .rpt-zoom-btn:hover {
-  background: #27272a;
-  color: #ffffff;
+  background: var(--rpt-hover);
+  color: var(--rpt-text);
 }
 
 .rpt-zoom-btn.active {
-  background: #8b5cf6;
+  background: var(--rpt-accent);
   color: #ffffff;
 }
 
 .rpt-zoom-value {
   background: transparent;
   border: none;
-  color: #e4e4e7;
+  color: var(--rpt-text);
   font-size: 11px;
   font-weight: 600;
   min-width: 44px;
@@ -395,7 +468,7 @@
 }
 
 .rpt-zoom-value:hover {
-  background: #27272a;
+  background: var(--rpt-hover);
 }
 
 .rpt-zoom-menu-item {
@@ -404,7 +477,7 @@
   text-align: left;
   background: transparent;
   border: none;
-  color: #d4d4d8;
+  color: var(--rpt-text);
   font-size: 11px;
   padding: 5px 12px;
   cursor: pointer;
@@ -412,12 +485,12 @@
 }
 
 .rpt-zoom-menu-item:hover {
-  background: #27272a;
-  color: #ffffff;
+  background: var(--rpt-hover);
+  color: var(--rpt-text);
 }
 
 .rpt-zoom-menu-item.active {
-  color: #a78bfa;
+  color: var(--rpt-accent);
   font-weight: 600;
 }
 
@@ -428,7 +501,7 @@
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--rpt-muted);
   background-color: transparent;
   border: 1px solid transparent;
   cursor: pointer;
@@ -438,14 +511,14 @@
 }
 
 .rpt-page-tab:hover {
-  background-color: #18181b;
-  color: #e4e4e7;
+  background-color: var(--rpt-panel-2);
+  color: var(--rpt-text);
 }
 
 .rpt-page-tab.active {
-  background-color: #27272a;
-  border-color: #3f3f46;
-  color: #fafafa;
+  background-color: var(--rpt-panel-2);
+  border-color: var(--rpt-border);
+  color: var(--rpt-text);
   font-weight: 500;
 }
 
@@ -456,7 +529,7 @@
 .rpt-tab-action-btn {
   background: transparent;
   border: none;
-  color: #71717a;
+  color: var(--rpt-muted);
   padding: 2px;
   border-radius: 3px;
   display: inline-flex;
@@ -466,14 +539,14 @@
 }
 
 .rpt-tab-action-btn:hover {
-  color: #e4e4e7;
-  background-color: #3f3f46;
+  color: var(--rpt-text);
+  background-color: var(--rpt-hover);
 }
 
 .rpt-add-tab-btn {
   background: transparent;
-  border: 1px dashed #3f3f46;
-  color: #a1a1aa;
+  border: 1px dashed var(--rpt-border);
+  color: var(--rpt-muted);
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -485,9 +558,9 @@
 }
 
 .rpt-add-tab-btn:hover {
-  background-color: #18181b;
-  color: #f4f4f5;
-  border-color: #71717a;
+  background-color: var(--rpt-panel-2);
+  color: var(--rpt-text);
+  border-color: var(--rpt-border-subtle);
 }
 
 /* --------------------------------------------------------------------------
@@ -497,8 +570,8 @@
   width: 280px;
   min-width: 280px;
   max-width: 280px;
-  background-color: #121215;
-  border-left: 1px solid #27272a;
+  background-color: var(--rpt-panel);
+  border-left: 1px solid var(--rpt-border);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -514,8 +587,8 @@
 
 .rpt-right-panel-tabs {
   display: flex;
-  border-bottom: 1px solid #27272a;
-  background-color: #151518;
+  border-bottom: 1px solid var(--rpt-border);
+  background-color: var(--rpt-panel);
 }
 
 .rpt-right-tab-btn {
@@ -526,20 +599,20 @@
   padding: 10px 4px;
   font-size: 12px;
   font-weight: 600;
-  color: #a1a1aa;
+  color: var(--rpt-muted);
   cursor: pointer;
   text-align: center;
   transition: all 0.15s;
 }
 
 .rpt-right-tab-btn:hover {
-  color: #f4f4f5;
+  color: var(--rpt-text);
 }
 
 .rpt-right-tab-btn.active {
-  color: #8b5cf6;
-  border-bottom-color: #8b5cf6;
-  background-color: #18181b;
+  color: var(--rpt-accent);
+  border-bottom-color: var(--rpt-accent);
+  background-color: var(--rpt-panel-2);
 }
 
 .rpt-right-panel-content {
@@ -556,7 +629,7 @@
   justify-content: center;
   padding: 40px 16px;
   text-align: center;
-  color: #71717a;
+  color: var(--rpt-muted);
   gap: 8px;
   font-size: 13px;
 }
@@ -565,20 +638,20 @@
    Tile Styles & Overlays
    -------------------------------------------------------------------------- */
 .rpt-tile {
-  background-color: #18181b;
-  border: 1px solid #27272a;
+  background-color: var(--rpt-tile-bg);
+  border: 1px solid var(--rpt-border);
   border-radius: 8px;
   position: absolute;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--rpt-shadow);
   transition: box-shadow 0.15s, border-color 0.15s;
 }
 
 .rpt-tile.selected {
-  outline: 2px solid #8b5cf6;
-  box-shadow: 0 0 0 1px #8b5cf6, 0 8px 24px rgba(139, 92, 246, 0.25);
+  outline: 2px solid var(--rpt-accent);
+  box-shadow: 0 0 0 1px var(--rpt-accent), 0 8px 24px rgba(139, 92, 246, 0.25);
   z-index: 50 !important;
 }
 
@@ -587,7 +660,7 @@
   position: absolute;
   width: 10px;
   height: 10px;
-  background-color: #8b5cf6;
+  background-color: var(--rpt-accent);
   border: 1px solid #ffffff;
   border-radius: 2px;
   opacity: 0.9;
@@ -605,15 +678,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #27272a;
-  background-color: #151518;
+  border-bottom: 1px solid var(--rpt-border);
+  background-color: var(--rpt-tile-header);
   user-select: none;
 }
 
 .rpt-tile-title {
   font-size: 13px;
   font-weight: 600;
-  color: #f4f4f5;
+  color: var(--rpt-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -640,8 +713,8 @@
   top: 6px;
   right: 6px;
   z-index: 25;
-  background: rgba(24, 24, 27, 0.95);
-  border: 1px solid #3f3f46;
+  background: var(--rpt-panel-2);
+  border: 1px solid var(--rpt-border);
   border-radius: 6px;
   display: none;
   align-items: center;
@@ -657,7 +730,7 @@
 .rpt-hover-icon-btn {
   background: transparent;
   border: none;
-  color: #a1a1aa;
+  color: var(--rpt-muted);
   padding: 4px;
   border-radius: 4px;
   cursor: pointer;
@@ -667,8 +740,8 @@
 }
 
 .rpt-hover-icon-btn:hover {
-  background: #27272a;
-  color: #fafafa;
+  background: var(--rpt-hover);
+  color: var(--rpt-text);
 }
 
 .rpt-hover-icon-btn.danger:hover {
@@ -794,4 +867,41 @@
 
 .rpt-tile.view-mode {
   cursor: default;
+}
+
+/* --------------------------------------------------------------------------
+   Chart elements theming for Light & Dark modes
+   -------------------------------------------------------------------------- */
+.rpt-tile .recharts-cartesian-grid-line,
+.rpt-tile line.recharts-cartesian-grid-line,
+.rpt-legacy .recharts-cartesian-grid-line,
+.rpt-legacy line.recharts-cartesian-grid-line {
+  stroke: var(--rpt-chart-grid) !important;
+}
+
+.rpt-tile .recharts-text,
+.rpt-tile text.recharts-cartesian-axis-tick-value,
+.rpt-tile .recharts-cartesian-axis-line,
+.rpt-legacy .recharts-text,
+.rpt-legacy text {
+  fill: var(--rpt-chart-text) !important;
+}
+
+.rpt-tile .recharts-cartesian-axis-line {
+  stroke: var(--rpt-border) !important;
+}
+
+.rpt-tile .recharts-default-tooltip {
+  background-color: var(--rpt-tooltip-bg) !important;
+  border-color: var(--rpt-border) !important;
+  color: var(--rpt-tooltip-text) !important;
+}
+
+.rpt-tile .recharts-legend-item-text {
+  color: var(--rpt-chart-text) !important;
+}
+
+/* Ensure legacy charts remain readable */
+[data-theme="light"] .rpt-legacy {
+  filter: contrast(1.05);
 }

@@ -114,25 +114,25 @@ export function TableRenderer({
           }}
           style={{
             flex: 1,
-            background: "#18181b",
-            border: "1px solid #27272a",
-            color: "#f4f4f5",
+            background: "var(--rpt-panel-2, #18181b)",
+            border: "1px solid var(--rpt-border, #27272a)",
+            color: "var(--rpt-text, #f4f4f5)",
             fontSize: 11,
             padding: "4px 8px",
             borderRadius: 4,
             outline: "none",
           }}
         />
-        <span style={{ fontSize: 10, color: "#71717a", whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: 10, color: "var(--rpt-muted, #71717a)", whiteSpace: "nowrap" }}>
           {sortedRows.length} rows
         </span>
       </div>
 
       {/* Table Container */}
-      <div style={{ flex: 1, overflow: "auto", border: "1px solid #27272a", borderRadius: 4 }}>
+      <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--rpt-border, #27272a)", borderRadius: 4 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, textAlign: "left" }}>
           <thead>
-            <tr style={{ background: "#151518", borderBottom: "1px solid #27272a", position: "sticky", top: 0, zIndex: 2 }}>
+            <tr style={{ background: "var(--rpt-tile-header, #151518)", borderBottom: "1px solid var(--rpt-border, #27272a)", position: "sticky", top: 0, zIndex: 2 }}>
               {tableData.cols.map((col) => (
                 <th
                   key={col}
@@ -140,7 +140,7 @@ export function TableRenderer({
                   style={{
                     padding: "6px 8px",
                     fontWeight: 600,
-                    color: "#a1a1aa",
+                    color: "var(--rpt-muted, #a1a1aa)",
                     cursor: "pointer",
                     userSelect: "none",
                     whiteSpace: "nowrap",
@@ -165,13 +165,13 @@ export function TableRenderer({
                     }
                   }}
                   style={{
-                    borderBottom: "1px solid #1f1f23",
+                    borderBottom: "1px solid var(--rpt-border, #1f1f23)",
                     backgroundColor: isSelected ? "rgba(139, 92, 246, 0.2)" : "transparent",
                     cursor: isInteractive ? "pointer" : "default",
                   }}
                 >
                   {tableData.cols.map((col) => (
-                    <td key={col} style={{ padding: "6px 8px", color: "#e4e4e7", whiteSpace: "nowrap" }}>
+                    <td key={col} style={{ padding: "6px 8px", color: "var(--rpt-text, #e4e4e7)", whiteSpace: "nowrap" }}>
                       {String(row[col] ?? "")}
                     </td>
                   ))}

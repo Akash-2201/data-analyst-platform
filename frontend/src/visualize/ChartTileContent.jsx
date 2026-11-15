@@ -96,7 +96,7 @@ export function ChartTileContent({
           textAlign: text?.align || "left",
           fontSize: text?.size === "title" ? 22 : text?.size === "subtitle" ? 16 : 13,
           fontWeight: text?.bold ? 700 : 400,
-          color: "#f4f4f5",
+          color: "var(--rpt-text, #f4f4f5)",
           wordBreak: "break-word",
         }}
       >

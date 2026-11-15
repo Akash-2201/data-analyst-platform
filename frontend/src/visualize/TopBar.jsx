@@ -27,6 +27,7 @@ export function TopBar({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameVal, setNameVal] = useState(present.name);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportTheme, setExportTheme] = useState("current");
   const exportMenuRef = useRef(null);
 
   useEffect(() => {
@@ -248,15 +249,39 @@ export function TopBar({
                 top: "100%",
                 right: 0,
                 marginTop: 4,
-                backgroundColor: "#18181b",
-                border: "1px solid #27272a",
+                backgroundColor: "var(--rpt-panel, #18181b)",
+                border: "1px solid var(--rpt-border, #27272a)",
                 borderRadius: 6,
                 boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
                 zIndex: 100,
-                minWidth: 160,
+                minWidth: 180,
                 padding: "4px 0",
               }}
             >
+              <div style={{ padding: "6px 14px 8px 14px", borderBottom: "1px solid var(--rpt-border, #27272a)" }}>
+                <div style={{ fontSize: 10, color: "var(--rpt-muted, #a1a1aa)", textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
+                  Export Theme
+                </div>
+                <select
+                  value={exportTheme}
+                  onChange={(e) => setExportTheme(e.target.value)}
+                  style={{
+                    width: "100%",
+                    background: "var(--rpt-panel-2, #18181b)",
+                    border: "1px solid var(--rpt-border, #27272a)",
+                    color: "var(--rpt-text, #f4f4f5)",
+                    borderRadius: 4,
+                    padding: "3px 6px",
+                    fontSize: 11,
+                    outline: "none",
+                  }}
+                >
+                  <option value="current">Current ({theme})</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+
               <button
                 type="button"
                 className="rpt-export-menu-item"
@@ -266,13 +291,13 @@ export function TopBar({
                   padding: "8px 14px",
                   background: "transparent",
                   border: "none",
-                  color: "#e4e4e7",
+                  color: "var(--rpt-text, #e4e4e7)",
                   fontSize: 12,
                   cursor: "pointer",
                 }}
                 onClick={() => {
                   setExportMenuOpen(false);
-                  onExportPdf?.();
+                  onExportPdf?.(exportTheme);
                 }}
               >
                 📄 Export PDF (All Pages)
@@ -286,13 +311,13 @@ export function TopBar({
                   padding: "8px 14px",
                   background: "transparent",
                   border: "none",
-                  color: "#e4e4e7",
+                  color: "var(--rpt-text, #e4e4e7)",
                   fontSize: 12,
                   cursor: "pointer",
                 }}
                 onClick={() => {
                   setExportMenuOpen(false);
-                  onExportPng?.();
+                  onExportPng?.(exportTheme);
                 }}
               >
                 🖼️ Export PNG (Current Page)
@@ -306,7 +331,7 @@ export function TopBar({
                   padding: "8px 14px",
                   background: "transparent",
                   border: "none",
-                  color: "#e4e4e7",
+                  color: "var(--rpt-text, #e4e4e7)",
                   fontSize: 12,
                   cursor: "pointer",
                 }}
@@ -320,6 +345,18 @@ export function TopBar({
             </div>
           )}
         </div>
+
+        {/* Theme Toggle Button (☀️ / 🌙, Ctrl+Shift+T) */}
+        <button
+          type="button"
+          className="rpt-btn rpt-theme-toggle-btn"
+          onClick={onToggleTheme}
+          title={`Switch to ${theme === "light" ? "dark" : "light"} theme (Ctrl+Shift+T)`}
+          aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}
+        >
+          <span className="rpt-btn-icon">{theme === "light" ? "🌙" : "☀️"}</span>
+          <span className="rpt-btn-label-secondary">{theme === "light" ? "Dark" : "Light"}</span>
+        </button>
 
         {onToggleFullscreen && (
           <button

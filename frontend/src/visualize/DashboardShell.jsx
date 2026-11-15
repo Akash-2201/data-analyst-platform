@@ -156,18 +156,33 @@ export function DashboardShell({
   };
 
   const activePage = state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0];
+  const theme = state.present.settings?.theme || "light";
+
+  const handleToggleTheme = useCallback((targetTheme) => {
+    const next = targetTheme || (theme === "light" ? "dark" : "light");
+    try {
+      localStorage.setItem("datalyst_viz_theme", next);
+    } catch {}
+    dispatch({
+      type: "SET_SETTINGS",
+      payload: { theme: next },
+    });
+    showToast(`Switched to ${next} theme`);
+  }, [theme, dispatch, showToast]);
 
   const handleGenerateDashboard = () => {
     const autoPage = generateAutoDashboardPage(columns, state.present.pages);
     dispatch({ type: "ADD_GENERATED_PAGE", payload: autoPage });
   };
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (exportTheme = "current") => {
     try {
       await exportDashboardPdf({
         dashboard: state.present,
         datasetFilename,
         canvasRef,
+        exportTheme,
+        currentTheme: theme,
         onProgress: (msg) => setExportProgress(msg),
       });
     } catch (err) {
@@ -178,9 +193,14 @@ export function DashboardShell({
     }
   };
 
-  const handleExportPng = async () => {
+  const handleExportPng = async (exportTheme = "current") => {
     if (canvasRef.current) {
-      await exportElementAsPng(canvasRef.current, `${datasetFilename}_${activePage?.name || "page"}`);
+      await exportElementAsPng(
+        canvasRef.current,
+        `${datasetFilename}_${activePage?.name || "page"}`,
+        exportTheme,
+        theme
+      );
     }
   };
 
@@ -265,16 +285,20 @@ export function DashboardShell({
           e.preventDefault();
           dispatch({ type: "DUPLICATE_TILES" });
         }
+      } else if (modKey && e.shiftKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        handleToggleTheme();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state.present.mode, state.present.selectedTileIds, state.present.clipboard]);
+  }, [state.present.mode, state.present.selectedTileIds, state.present.clipboard, handleToggleTheme]);
 
   const contextValue = {
     state,
     dispatch,
+    theme,
     activePage: state.present.pages.find((p) => p.id === state.present.activePageId) || state.present.pages[0],
     zoom: {
       zoomMode,
@@ -319,6 +343,7 @@ export function DashboardShell({
       <div
         ref={rootRef}
         className="rpt-dashboard-root"
+        data-theme={theme}
         style={{
           position: "fixed",
           left: 0,
@@ -365,11 +390,13 @@ export function DashboardShell({
             saveTime={saveTime}
             isSaving={isSaving}
             onGenerateDashboard={onGenerateDashboard || handleGenerateDashboard}
-            onExportPdf={onExportPdf || handleExportPdf}
-            onExportPng={onExportPng || handleExportPng}
+            onExportPdf={handleExportPdf}
+            onExportPng={handleExportPng}
             onExportCsv={onExportCsv || handleExportCsv}
             isFullscreen={isFullscreen}
             onToggleFullscreen={handleToggleFullscreen}
+            theme={theme}
+            onToggleTheme={handleToggleTheme}
             toggleLeftDrawer={() => {
               if (window.innerWidth <= 768) {
                 setLeftDrawerOpen(!leftDrawerOpen);

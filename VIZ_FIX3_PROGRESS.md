@@ -8,7 +8,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 - [x] STEP 2: DATA FIELDS ALWAYS VISIBLE (P2)
 - [x] STEP 3: BIGGER, RESIZABLE PAGES (P4)
 - [x] STEP 4: NEW DRAG/RESIZE ENGINE (P1)
-- [ ] STEP 5: LIGHT / DARK THEME (P3)
+- [x] STEP 5: LIGHT / DARK THEME (P3)
 - [ ] STEP 6 / VERIFY: Real evidence & screenshots
 
 ## Diagnostic Findings (STEP 0)

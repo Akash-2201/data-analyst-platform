@@ -43,6 +43,13 @@ export function makeEmptyPage(name = "Page 1", size = { w: 1920, h: 1080 }) {
 
 export function makeInitialDashboard(datasetFilename = "Dashboard") {
   const firstPage = makeEmptyPage("Page 1");
+  const savedTheme = (() => {
+    try {
+      return localStorage.getItem("datalyst_viz_theme") || "light";
+    } catch {
+      return "light";
+    }
+  })();
   return {
     id: makeId("dash"),
     name: datasetFilename ? `${datasetFilename.replace(/\.[^/.]+$/, "")} Dashboard` : "Analytics Dashboard",
@@ -52,6 +59,7 @@ export function makeInitialDashboard(datasetFilename = "Dashboard") {
       snap: true,
       showGrid: true,
       autoAlign: false,
+      theme: savedTheme,
     },
     pages: [firstPage],
     selectedTileIds: [],

@@ -50,19 +50,19 @@ export function ScatterChartRenderer({
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart margin={{ top: 12, right: 16, bottom: 24, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--rpt-chart-grid, #27272a)" />
         <XAxis
           dataKey="x"
           name={data.x_label || "X"}
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
-          tick={{ fill: "#a1a1aa", fontSize: 10 }}
+          tick={{ fill: "var(--rpt-chart-text, #a1a1aa)", fontSize: 10 }}
         />
         <YAxis
           dataKey="y"
           name={data.y_label || "Y"}
-          stroke="#71717a"
+          stroke="var(--rpt-muted, #71717a)"
           fontSize={11}
           tickLine={false}
           axisLine={false}
@@ -71,14 +71,14 @@ export function ScatterChartRenderer({
         <Tooltip
           cursor={{ strokeDasharray: "3 3" }}
           contentStyle={{
-            backgroundColor: "#18181b",
-            borderColor: "#3f3f46",
+            backgroundColor: "var(--rpt-tooltip-bg, #18181b)",
+            borderColor: "var(--rpt-border, #3f3f46)",
             borderRadius: 6,
             fontSize: 12,
-            color: "#f4f4f5",
+            color: "var(--rpt-tooltip-text, #f4f4f5)",
           }}
         />
-        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />}
+        {format.showLegend && <Legend wrapperStyle={{ fontSize: 11, color: "var(--rpt-chart-text, #a1a1aa)" }} />}
         <Scatter
           name={data.x_label || "Points"}
           data={chartData}

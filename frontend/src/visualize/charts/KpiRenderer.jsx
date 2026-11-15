@@ -46,7 +46,7 @@ export function KpiRenderer({
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: "#a1a1aa",
+          color: "var(--rpt-muted, #a1a1aa)",
           textTransform: "uppercase",
           letterSpacing: "0.05em",
           marginBottom: 8,
@@ -59,7 +59,7 @@ export function KpiRenderer({
         style={{
           fontSize: 36,
           fontWeight: 800,
-          color: format.color || "#8b5cf6",
+          color: format.color || "var(--rpt-accent, #8b5cf6)",
           letterSpacing: "-0.02em",
           lineHeight: 1.1,
           wordBreak: "break-word",
@@ -73,7 +73,7 @@ export function KpiRenderer({
           style={{
             marginTop: 10,
             fontSize: 11,
-            color: "#71717a",
+            color: "var(--rpt-muted, #71717a)",
             display: "flex",
             gap: 12,
           }}
