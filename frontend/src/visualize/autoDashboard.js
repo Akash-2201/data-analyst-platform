@@ -49,9 +49,10 @@ export function getSmartRecommendations(columns = []) {
     });
   }
 
-  // Recommendation 2: Bar Chart (Text column with <= 12 distinct values + Measure)
+  // Recommendation 2: Bar Chart (Category/Dimension + Measure)
   const barCat =
-    categoricals.find((c) => c.distinctCount <= 12 && c.name.toLowerCase() !== "city") ||
+    categoricals.find((c) => /^(category|type|status|dept|segment|product)/i.test(c.name)) ||
+    categoricals.find((c) => c.distinctCount <= 12 && !/name|email|phone/i.test(c.name) && c.name.toLowerCase() !== "city") ||
     categoricals.find((c) => c.distinctCount <= 12);
   if (barCat && measures.length > 0) {
     recommendations.push({
@@ -66,8 +67,9 @@ export function getSmartRecommendations(columns = []) {
     });
   }
 
-  // Recommendation 3: Donut Chart (Text column with <= 8 distinct values + Measure)
+  // Recommendation 3: Donut Chart (City/Distribution + Measure)
   const donutCat =
+    categoricals.find((c) => /^(city|region|state|channel|device)/i.test(c.name) && c.name !== barCat?.name) ||
     categoricals.find((c) => c.distinctCount <= 8 && c.name !== barCat?.name) ||
     categoricals.find((c) => c.distinctCount <= 8);
   if (donutCat && measures.length > 0) {

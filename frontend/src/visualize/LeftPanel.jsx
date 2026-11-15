@@ -226,7 +226,7 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             <span>✨ Smart Recommendations</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {recommendations.slice(0, 3).map((rec) => (
+            {recommendations.slice(0, 4).map((rec) => (
               <div
                 key={rec.id}
                 onClick={() => handleAddRecommendation(rec)}
