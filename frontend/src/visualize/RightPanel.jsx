@@ -3,16 +3,25 @@
  * Right panel (300px): DATA, FORMAT, and FILTERS tabs for the selected tile.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useDashboard } from "./dashboardContext";
 import { PALETTES } from "./constants";
 import { FilterTab } from "./FilterTab";
+import { classifyColumn } from "./utils";
 
 export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }) {
   const { state, dispatch } = useDashboard();
   const { present } = state;
   const { activePageId, pages, selectedTileIds, mode } = present;
   const [activeTab, setActiveTab] = useState("data");
+
+  const prevSelectedRef = useRef(selectedTileIds);
+  useEffect(() => {
+    if (selectedTileIds?.length > 0 && selectedTileIds[0] !== prevSelectedRef.current?.[0]) {
+      setActiveTab("data");
+    }
+    prevSelectedRef.current = selectedTileIds;
+  }, [selectedTileIds]);
 
   const activePage = pages.find((p) => p.id === activePageId) || pages[0];
   const selectedTile = activePage?.tiles.find((t) => selectedTileIds?.includes(t.id));
@@ -39,7 +48,24 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
     });
   };
 
-  const colNames = (columns || []).map((c) => (typeof c === "string" ? c : c.name));
+  const colNames = useMemo(() => (columns || []).map((c) => (typeof c === "string" ? c : c.name)), [columns]);
+
+  // Column role filtering for dropdowns
+  const classifiedCols = useMemo(() => (columns || []).map(classifyColumn), [columns]);
+  const measureCols = useMemo(() => {
+    const list = classifiedCols.filter((c) => c.group === "NUMERICAL").map((c) => c.name);
+    return list.length > 0 ? list : colNames;
+  }, [classifiedCols, colNames]);
+  const dateCols = useMemo(() => {
+    const list = classifiedCols.filter((c) => c.group === "DATE").map((c) => c.name);
+    return list.length > 0 ? list : colNames;
+  }, [classifiedCols, colNames]);
+  const categoryCols = useMemo(() => {
+    const list = classifiedCols
+      .filter((c) => c.group === "TEXT" || c.group === "TEXT/Identifier" || c.group === "LOCATION" || c.group === "DATE")
+      .map((c) => c.name);
+    return list.length > 0 ? list : colNames;
+  }, [classifiedCols, colNames]);
 
   return (
     <aside className={`rpt-right-panel ${isOpen ? "drawer-open" : ""} ${isCollapsed ? "collapsed" : ""}`}>
@@ -121,9 +147,20 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {/* X Axis */}
+                {/* Visual Type indicator */}
+                <div style={{ fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase" }}>
+                  {(selectedTile.chartConfig?.chartType || "bar").replace("_", " ")} Visual Configuration
+                </div>
+
+                {/* X Axis / Category */}
                 <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>X-Axis / Category</label>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>
+                    {selectedTile.chartConfig?.chartType === "scatter"
+                      ? "X-Axis / Measure"
+                      : selectedTile.chartConfig?.chartType === "line" || selectedTile.chartConfig?.chartType === "area"
+                      ? "Date / X-Axis"
+                      : "X-Axis / Category"}
+                  </label>
                   <select
                     value={selectedTile.chartConfig?.xCol || ""}
                     onChange={(e) => updateChartConfig({ xCol: e.target.value })}
@@ -138,16 +175,25 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
                       marginTop: 4,
                     }}
                   >
-                    <option value="">(Select X column)</option>
-                    {colNames.map((c) => (
+                    <option value="">(Select column)</option>
+                    {(selectedTile.chartConfig?.chartType === "scatter"
+                      ? measureCols
+                      : selectedTile.chartConfig?.chartType === "line"
+                      ? (dateCols.length > 0 ? dateCols : categoryCols)
+                      : categoryCols
+                    ).map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Y Axis */}
+                {/* Y Axis / Metric */}
                 <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Y-Axis / Metric</label>
+                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>
+                    {selectedTile.chartConfig?.chartType === "kpi"
+                      ? "Metric (Measure)"
+                      : "Y-Axis / Metric (Measure)"}
+                  </label>
                   <select
                     value={selectedTile.chartConfig?.yCol || ""}
                     onChange={(e) => updateChartConfig({ yCol: e.target.value })}
@@ -163,35 +209,37 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
                     }}
                   >
                     <option value="">(Optional / Count-based)</option>
-                    {colNames.map((c) => (
+                    {measureCols.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Stack / Legend Column */}
-                <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Legend / Stack Column</label>
-                  <select
-                    value={selectedTile.chartConfig?.stackCol || ""}
-                    onChange={(e) => updateChartConfig({ stackCol: e.target.value })}
-                    style={{
-                      width: "100%",
-                      background: "#18181b",
-                      border: "1px solid #27272a",
-                      color: "#f4f4f5",
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      fontSize: 12,
-                      marginTop: 4,
-                    }}
-                  >
-                    <option value="">(None)</option>
-                    {colNames.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
+                {/* Stack / Legend Column (for bar/stacked) */}
+                {selectedTile.chartConfig?.chartType !== "kpi" && selectedTile.chartConfig?.chartType !== "scatter" && (
+                  <div>
+                    <label style={{ fontSize: 11, color: "#a1a1aa" }}>Legend / Stack Column</label>
+                    <select
+                      value={selectedTile.chartConfig?.stackCol || ""}
+                      onChange={(e) => updateChartConfig({ stackCol: e.target.value })}
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        marginTop: 4,
+                      }}
+                    >
+                      <option value="">(None)</option>
+                      {categoryCols.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Aggregation */}
                 <div>
@@ -242,28 +290,32 @@ export function RightPanel({ columns = [], isOpen = false, isCollapsed = false }
                   </select>
                 </div>
 
-                {/* Date Grain */}
-                <div>
-                  <label style={{ fontSize: 11, color: "#a1a1aa" }}>Date Grain</label>
-                  <select
-                    value={selectedTile.chartConfig?.dateGrain || "month"}
-                    onChange={(e) => updateChartConfig({ dateGrain: e.target.value })}
-                    style={{
-                      width: "100%",
-                      background: "#18181b",
-                      border: "1px solid #27272a",
-                      color: "#f4f4f5",
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      fontSize: 12,
-                      marginTop: 4,
-                    }}
-                  >
-                    <option value="day">Day</option>
-                    <option value="month">Month</option>
-                    <option value="year">Year</option>
-                  </select>
-                </div>
+                {/* Date Grain (if Line or Area or Date) */}
+                {(selectedTile.chartConfig?.chartType === "line" ||
+                  selectedTile.chartConfig?.chartType === "area" ||
+                  dateCols.includes(selectedTile.chartConfig?.xCol)) && (
+                  <div>
+                    <label style={{ fontSize: 11, color: "#a1a1aa" }}>Date Grain</label>
+                    <select
+                      value={selectedTile.chartConfig?.dateGrain || "month"}
+                      onChange={(e) => updateChartConfig({ dateGrain: e.target.value })}
+                      style={{
+                        width: "100%",
+                        background: "#18181b",
+                        border: "1px solid #27272a",
+                        color: "#f4f4f5",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        marginTop: 4,
+                      }}
+                    >
+                      <option value="day">Day</option>
+                      <option value="month">Month</option>
+                      <option value="year">Year</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* Interaction Mode */}
                 <div>

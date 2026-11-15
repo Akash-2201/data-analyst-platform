@@ -6,7 +6,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 - [x] STEP 0: DIAGNOSE (no edits)
 - [x] STEP 1: LAYOUT FILLS THE WINDOW (P3)
 - [x] STEP 2: CANVAS SIZE + ZOOM (P2, P7)
-- [ ] STEP 3: TOP BAR (P4)
+- [x] STEP 3: TOP BAR (P4)
 - [ ] STEP 4: SELECTION + DATA ASSIGNMENT (P1)
 - [ ] STEP 5: COLUMN CLASSIFICATION (P5)
 - [ ] STEP 6: RECOMMENDATIONS (P6)
@@ -18,7 +18,7 @@ Project Root: `C:\Users\j9698\OneDrive\Desktop\data-analyst-platform\data-analys
 |------|-------------|-------------|
 | STEP 1 | ed60750 | viz-fix: layout fills window |
 | STEP 2 | f7aab4d | viz-fix: canvas scale + zoom + visibility |
-| STEP 3 | - | viz-fix: top bar |
+| STEP 3 | c331355 | viz-fix: top bar |
 | STEP 4 | - | viz-fix: selection + data assignment |
 | STEP 5 | - | viz-fix: column classification |
 | STEP 6 | - | viz-fix: recommendations |

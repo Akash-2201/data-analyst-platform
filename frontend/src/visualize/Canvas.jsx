@@ -113,7 +113,7 @@ export function Canvas({
     });
   };
 
-  const handleTileClick = (e, tileId) => {
+  const handleTilePointerDown = (e, tileId) => {
     e.stopPropagation();
     if (mode === "edit") {
       dispatch({
@@ -124,7 +124,15 @@ export function Canvas({
   };
 
   const handleCanvasClick = (e) => {
-    if (mode === "edit") {
+    if (mode !== "edit") return;
+    const target = e.target;
+    if (
+      target === e.currentTarget ||
+      target.classList?.contains("rpt-canvas-viewport") ||
+      target.classList?.contains("rpt-canvas-outer") ||
+      target.classList?.contains("rpt-canvas-wrapper") ||
+      target.classList?.contains("react-grid-layout")
+    ) {
       dispatch({ type: "CLEAR_SELECTION" });
     }
   };
@@ -242,7 +250,9 @@ export function Canvas({
                   borderRadius: tile.format?.radius ?? 8,
                   zIndex: tile.z || 1,
                 }}
-                onClick={(e) => handleTileClick(e, tile.id)}
+                onPointerDownCapture={(e) => handleTilePointerDown(e, tile.id)}
+                onMouseDownCapture={(e) => handleTilePointerDown(e, tile.id)}
+                onClick={(e) => e.stopPropagation()}
               >
                 {/* Tile Header */}
                 {tile.format?.showTitle !== false && (

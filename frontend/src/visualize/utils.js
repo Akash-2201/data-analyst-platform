@@ -181,3 +181,123 @@ export function formatIndianNumber(num) {
   }
   return Number(num).toLocaleString("en-IN");
 }
+
+export function isStrictDateString(val) {
+  if (val === null || val === undefined) return false;
+  const s = String(val).trim();
+  if (!s || /^\d+(\.\d+)?$/.test(s)) return false;
+
+  // YYYY-MM-DD, YYYY/MM/DD
+  const m1 = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m1) {
+    const m = parseInt(m1[2], 10);
+    const d = parseInt(m1[3], 10);
+    return m >= 1 && m <= 12 && d >= 1 && d <= 31;
+  }
+
+  // DD-MM-YYYY, DD/MM/YYYY
+  const m2 = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m2) {
+    const d = parseInt(m2[1], 10);
+    const m = parseInt(m2[2], 10);
+    return m >= 1 && m <= 12 && d >= 1 && d <= 31;
+  }
+
+  // ISO with T (e.g. 2026-09-16T10:30:00)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+    return true;
+  }
+
+  // Month D, YYYY (e.g. "September 16, 2026")
+  if (/^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}/.test(s)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function classifyColumn(col) {
+  const name = typeof col === "string" ? col : (col && col.name) || "";
+  const nameLower = name.toLowerCase();
+  const inferred = ((col && (col.inferred_type || col.dtype)) || "").toLowerCase();
+  const samples = (col && col.sample_values) || [];
+
+  // 1. Flags & Boolean
+  if (
+    nameLower.endsWith("_outlier") ||
+    nameLower.includes("_flag_") ||
+    nameLower.startsWith("is_") ||
+    nameLower.startsWith("has_") ||
+    inferred.includes("bool")
+  ) {
+    return { name, group: "Flags", subType: "boolean", isMeasure: false, defaultAgg: "count" };
+  }
+
+  // 2. Location: latitude / longitude coordinates
+  if (
+    /^lat(itude)?$/i.test(nameLower) ||
+    /^(lon|lng|longitude)$/i.test(nameLower)
+  ) {
+    return { name, group: "LOCATION", subType: "coordinate", isMeasure: false, defaultAgg: "avg" };
+  }
+
+  // 3. Date: >= 80% non-blank values match strict date pattern
+  const nonBlankSamples = samples.filter((v) => v !== null && v !== undefined && String(v).trim() !== "");
+  if (nonBlankSamples.length > 0) {
+    const dateCount = nonBlankSamples.filter(isStrictDateString).length;
+    if (dateCount / nonBlankSamples.length >= 0.8) {
+      return { name, group: "DATE", subType: "date", isMeasure: false, defaultAgg: "count" };
+    }
+  }
+  if (inferred.includes("date") || inferred.includes("time")) {
+    if (!samples.some((s) => /^\d+(\.\d+)?$/.test(String(s).trim()))) {
+      return { name, group: "DATE", subType: "date", isMeasure: false, defaultAgg: "count" };
+    }
+  }
+
+  // 4. Identifier / Phone / Code / Email -> TEXT / Identifier
+  if (/(phone|mobile|contact)/i.test(nameLower)) {
+    return { name, group: "TEXT/Identifier", subType: "Identifier", isMeasure: false, defaultAgg: "count" };
+  }
+  if (/(id|code|key|zip|pin)$/i.test(nameLower) || nameLower === "id") {
+    return { name, group: "TEXT/Identifier", subType: "Identifier", isMeasure: false, defaultAgg: "count" };
+  }
+  if (nameLower.includes("email")) {
+    return { name, group: "TEXT", subType: "text", isMeasure: false, defaultAgg: "count" };
+  }
+
+  // 5. Numerical measure vs numeric attribute
+  const numericSamples = nonBlankSamples.filter((v) => {
+    const clean = String(v).replace(/,/g, "").trim();
+    return clean !== "" && !isNaN(Number(clean));
+  });
+  const isNumeric =
+    (nonBlankSamples.length > 0 && numericSamples.length / nonBlankSamples.length >= 0.8) ||
+    inferred.includes("int") ||
+    inferred.includes("float") ||
+    inferred.includes("numeric") ||
+    inferred.includes("currency") ||
+    !!(col && col.numeric_stats);
+
+  if (isNumeric) {
+    // Check if ID-like uniformly formatted number (e.g. 10-digit phone or zip)
+    const isUniformLongDigits = nonBlankSamples.length > 0 && nonBlankSamples.every((v) => /^\d{10}$/.test(String(v).trim()));
+    if (isUniformLongDigits) {
+      return { name, group: "TEXT/Identifier", subType: "Identifier", isMeasure: false, defaultAgg: "count" };
+    }
+
+    const defaultAgg = /(age|rating|score|percent|rate|price)/i.test(nameLower) ? "avg" : "sum";
+    const isMeasure = !/(age|phone|zip|pin|year|month|day|id)/i.test(nameLower);
+
+    return {
+      name,
+      group: "NUMERICAL",
+      subType: defaultAgg,
+      isMeasure,
+      defaultAgg,
+    };
+  }
+
+  // 6. Otherwise TEXT
+  return { name, group: "TEXT", subType: "text", isMeasure: false, defaultAgg: "count" };
+}

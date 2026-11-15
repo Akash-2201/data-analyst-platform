@@ -9,7 +9,7 @@ import {
   VISUALIZATION_TYPES,
   MORE_VISUALIZATION_TYPES,
 } from "./constants";
-import { createDefaultTile, findFirstFreeSpot } from "./utils";
+import { createDefaultTile, findFirstFreeSpot, classifyColumn } from "./utils";
 import { getSmartRecommendations } from "./autoDashboard";
 
 export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false }) {
@@ -18,6 +18,12 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
   const { activePageId, pages, mode, selectedTileIds } = present;
   const [showMore, setShowMore] = useState(false);
   const [flagsOpen, setFlagsOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 2500);
+  };
 
   const activePage = pages.find((p) => p.id === activePageId) || pages[0];
   const selectedTile = activePage?.tiles.find((t) => selectedTileIds?.includes(t.id));
@@ -52,7 +58,7 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
     dispatch({ type: "ADD_TILE", payload: newTile });
   };
 
-  // Advanced client-side column classification
+  // Rigorous client-side column classification
   const categorized = useMemo(() => {
     const res = {
       numerical: [],
@@ -63,67 +69,17 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
     };
 
     (columns || []).forEach((col) => {
-      const name = typeof col === "string" ? col : col.name;
-      const inferred = (col.inferred_type || col.dtype || "").toLowerCase();
-      const nameLower = name.toLowerCase();
-      const samples = col.sample_values || [];
-
-      // Check date pattern in sample values (e.g. DD-MM-YYYY, YYYY-MM-DD, ISO)
-      const hasDateSample = samples.some((v) => {
-        if (!v) return false;
-        const s = String(v).trim();
-        return /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}/.test(s) || !isNaN(Date.parse(s));
-      });
-
-      // Flags & Boolean
-      if (
-        nameLower.endsWith("_outlier") ||
-        nameLower.includes("_flag_") ||
-        nameLower.startsWith("is_") ||
-        nameLower.startsWith("has_") ||
-        inferred.includes("bool")
-      ) {
-        res.flags.push(name);
-      }
-      // Location
-      else if (
-        nameLower.includes("lat") ||
-        nameLower.includes("lon") ||
-        nameLower.includes("coord") ||
-        nameLower === "country" ||
-        nameLower === "state" ||
-        nameLower === "city" ||
-        inferred.includes("location") ||
-        inferred.includes("geo")
-      ) {
-        res.location.push(name);
-      }
-      // Date
-      else if (
-        hasDateSample ||
-        inferred.includes("date") ||
-        inferred.includes("time") ||
-        nameLower.includes("date") ||
-        nameLower.includes("year") ||
-        nameLower.includes("month") ||
-        nameLower.includes("dob")
-      ) {
-        res.date.push(name);
-      }
-      // Numerical
-      else if (
-        inferred.includes("int") ||
-        inferred.includes("float") ||
-        inferred.includes("numeric") ||
-        inferred.includes("number") ||
-        inferred.includes("currency") ||
-        col.numeric_stats
-      ) {
-        res.numerical.push(name);
-      }
-      // Text / Categorical
-      else {
-        res.text.push(name);
+      const info = classifyColumn(col);
+      if (info.group === "Flags") {
+        res.flags.push(info);
+      } else if (info.group === "LOCATION") {
+        res.location.push(info);
+      } else if (info.group === "DATE") {
+        res.date.push(info);
+      } else if (info.group === "NUMERICAL") {
+        res.numerical.push(info);
+      } else {
+        res.text.push(info);
       }
     });
 
@@ -131,36 +87,58 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
   }, [columns]);
 
   // Click-to-assign field to currently selected chart tile
-  const handleFieldClick = (colName, colType) => {
-    if (mode === "view" || !selectedTile || selectedTile.kind !== "chart") return;
+  const handleFieldClick = (colInfo) => {
+    if (mode === "view") return;
 
-    if (colType === "numerical") {
-      dispatch({
-        type: "UPDATE_TILE",
-        payload: {
-          tileId: selectedTile.id,
-          updates: {
-            chartConfig: {
-              ...selectedTile.chartConfig,
-              yCol: colName,
-            },
-          },
-        },
-      });
-    } else {
-      dispatch({
-        type: "UPDATE_TILE",
-        payload: {
-          tileId: selectedTile.id,
-          updates: {
-            chartConfig: {
-              ...selectedTile.chartConfig,
-              xCol: colName,
-            },
-          },
-        },
-      });
+    if (!selectedTile) {
+      showToast("Select a tile to assign this field");
+      return;
     }
+
+    const colName = colInfo.name;
+    const isNum = colInfo.group === "NUMERICAL";
+
+    if (selectedTile.kind === "slicer") {
+      dispatch({
+        type: "UPDATE_TILE",
+        payload: {
+          tileId: selectedTile.id,
+          updates: {
+            slicer: { ...selectedTile.slicer, col: colName },
+          },
+        },
+      });
+      return;
+    }
+
+    if (selectedTile.kind !== "chart") return;
+
+    const cfg = selectedTile.chartConfig || {};
+    let updates = {};
+
+    // Logical open slot assignment
+    if (!cfg.xCol) {
+      updates = { xCol: colName };
+    } else if (!cfg.yCol) {
+      updates = { yCol: colName, agg: colInfo.defaultAgg || (isNum ? "sum" : "count") };
+    } else if (isNum) {
+      updates = { yCol: colName, agg: colInfo.defaultAgg || "sum" };
+    } else {
+      updates = { xCol: colName };
+    }
+
+    dispatch({
+      type: "UPDATE_TILE",
+      payload: {
+        tileId: selectedTile.id,
+        updates: {
+          chartConfig: {
+            ...cfg,
+            ...updates,
+          },
+        },
+      },
+    });
   };
 
   return (
@@ -299,28 +277,28 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             <div className="rpt-section-title" style={{ padding: "2px 0 4px 0", color: "#60a5fa" }}>
               # Numerical ({categorized.numerical.length})
             </div>
-            {categorized.numerical.map((name) => (
+            {categorized.numerical.map((col) => (
               <div
-                key={name}
+                key={col.name}
                 className="rpt-field-item"
-                onClick={() => handleFieldClick(name, "numerical")}
-                title={selectedTile ? `Assign ${name} to selected visual` : name}
+                onClick={() => handleFieldClick(col)}
+                title={selectedTile ? `Assign ${col.name} to selected visual` : col.name}
                 style={{
                   padding: "5px 8px",
                   fontSize: 11,
                   color: "#e4e4e7",
-                  cursor: selectedTile ? "pointer" : "default",
+                  cursor: "pointer",
                   borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  backgroundColor: selectedTile?.chartConfig?.yCol === name ? "rgba(59, 130, 246, 0.2)" : "transparent",
-                  border: selectedTile?.chartConfig?.yCol === name ? "1px solid #3b82f6" : "1px solid transparent",
+                  backgroundColor: selectedTile?.chartConfig?.yCol === col.name ? "rgba(59, 130, 246, 0.2)" : "transparent",
+                  border: selectedTile?.chartConfig?.yCol === col.name ? "1px solid #3b82f6" : "1px solid transparent",
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
                 <span style={{ fontSize: 9, color: "#60a5fa" }}>
-                  {selectedTile?.chartConfig?.yCol === name ? "Y-Axis" : "123"}
+                  {selectedTile?.chartConfig?.yCol === col.name ? "Y-Axis" : col.defaultAgg || "123"}
                 </span>
               </div>
             ))}
@@ -333,28 +311,28 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             <div className="rpt-section-title" style={{ padding: "2px 0 4px 0", color: "#34d399" }}>
               Aa Text ({categorized.text.length})
             </div>
-            {categorized.text.map((name) => (
+            {categorized.text.map((col) => (
               <div
-                key={name}
+                key={col.name}
                 className="rpt-field-item"
-                onClick={() => handleFieldClick(name, "text")}
-                title={selectedTile ? `Assign ${name} to selected visual` : name}
+                onClick={() => handleFieldClick(col)}
+                title={selectedTile ? `Assign ${col.name} to selected visual` : col.name}
                 style={{
                   padding: "5px 8px",
                   fontSize: 11,
                   color: "#e4e4e7",
-                  cursor: selectedTile ? "pointer" : "default",
+                  cursor: "pointer",
                   borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  backgroundColor: selectedTile?.chartConfig?.xCol === name ? "rgba(16, 185, 129, 0.2)" : "transparent",
-                  border: selectedTile?.chartConfig?.xCol === name ? "1px solid #10b981" : "1px solid transparent",
+                  backgroundColor: selectedTile?.chartConfig?.xCol === col.name ? "rgba(16, 185, 129, 0.2)" : "transparent",
+                  border: selectedTile?.chartConfig?.xCol === col.name ? "1px solid #10b981" : "1px solid transparent",
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
                 <span style={{ fontSize: 9, color: "#34d399" }}>
-                  {selectedTile?.chartConfig?.xCol === name ? "X-Axis" : "txt"}
+                  {selectedTile?.chartConfig?.xCol === col.name ? "X-Axis" : (col.subType === "Identifier" ? "id" : "txt")}
                 </span>
               </div>
             ))}
@@ -367,28 +345,28 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             <div className="rpt-section-title" style={{ padding: "2px 0 4px 0", color: "#fbbf24" }}>
               📅 Date ({categorized.date.length})
             </div>
-            {categorized.date.map((name) => (
+            {categorized.date.map((col) => (
               <div
-                key={name}
+                key={col.name}
                 className="rpt-field-item"
-                onClick={() => handleFieldClick(name, "date")}
-                title={selectedTile ? `Assign ${name} to selected visual` : name}
+                onClick={() => handleFieldClick(col)}
+                title={selectedTile ? `Assign ${col.name} to selected visual` : col.name}
                 style={{
                   padding: "5px 8px",
                   fontSize: 11,
                   color: "#e4e4e7",
-                  cursor: selectedTile ? "pointer" : "default",
+                  cursor: "pointer",
                   borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  backgroundColor: selectedTile?.chartConfig?.xCol === name ? "rgba(245, 158, 11, 0.2)" : "transparent",
-                  border: selectedTile?.chartConfig?.xCol === name ? "1px solid #f59e0b" : "1px solid transparent",
+                  backgroundColor: selectedTile?.chartConfig?.xCol === col.name ? "rgba(245, 158, 11, 0.2)" : "transparent",
+                  border: selectedTile?.chartConfig?.xCol === col.name ? "1px solid #f59e0b" : "1px solid transparent",
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
                 <span style={{ fontSize: 9, color: "#fbbf24" }}>
-                  {selectedTile?.chartConfig?.xCol === name ? "X-Axis" : "date"}
+                  {selectedTile?.chartConfig?.xCol === col.name ? "X-Axis" : "date"}
                 </span>
               </div>
             ))}
@@ -401,24 +379,24 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             <div className="rpt-section-title" style={{ padding: "2px 0 4px 0", color: "#f472b6" }}>
               📍 Location ({categorized.location.length})
             </div>
-            {categorized.location.map((name) => (
+            {categorized.location.map((col) => (
               <div
-                key={name}
+                key={col.name}
                 className="rpt-field-item"
-                onClick={() => handleFieldClick(name, "location")}
-                title={selectedTile ? `Assign ${name} to selected visual` : name}
+                onClick={() => handleFieldClick(col)}
+                title={selectedTile ? `Assign ${col.name} to selected visual` : col.name}
                 style={{
                   padding: "5px 8px",
                   fontSize: 11,
                   color: "#e4e4e7",
-                  cursor: selectedTile ? "pointer" : "default",
+                  cursor: "pointer",
                   borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
                 <span style={{ fontSize: 9, color: "#f472b6" }}>geo</span>
               </div>
             ))}
@@ -439,9 +417,9 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
             </button>
             {flagsOpen && (
               <div style={{ marginTop: 4, paddingLeft: 4 }}>
-                {categorized.flags.map((name) => (
-                  <div key={name} style={{ fontSize: 10, color: "#a1a1aa", padding: "3px 4px" }}>
-                    {name}
+                {categorized.flags.map((col) => (
+                  <div key={col.name} style={{ fontSize: 10, color: "#a1a1aa", padding: "3px 4px" }}>
+                    {col.name}
                   </div>
                 ))}
               </div>
@@ -449,6 +427,8 @@ export function LeftPanel({ columns = [], isOpen = false, isCollapsed = false })
           </div>
         )}
       </div>
+
+      {toastMsg && <div className="rpt-toast">{toastMsg}</div>}
     </aside>
   );
 }

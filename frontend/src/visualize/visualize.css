@@ -725,3 +725,22 @@
     transform: translateX(0);
   }
 }
+
+/* Subtle Toast Notification */
+.rpt-toast {
+  position: fixed;
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #27272a;
+  color: #f4f4f5;
+  border: 1px solid #3f3f46;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+  z-index: 999;
+  pointer-events: none;
+  animation: fadeInOnly 0.2s ease-out;
+}
