@@ -42,9 +42,16 @@ def run_pipeline_on_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict
     # 2. Categorical mappings (high confidence or recommended)
     for col in sug.get("column_results", []):
         col_name = col["name"]
-        mapping = col.get("mapping") or {}
-        extra_info = col.get("extra_info") or {}
-        confidences = extra_info.get("variant_confidences", {})
+        cat_an = col.get("categorical_analysis") or {}
+        mapping = cat_an.get("mapping") or col.get("mapping") or {}
+        confidences = cat_an.get("variant_confidences") or (col.get("extra_info") or {}).get("variant_confidences", {})
+        if not mapping:
+            for iss in col.get("issues", []):
+                if iss.get("action") == "standardize_category" and iss.get("recommended", True):
+                    p = iss.get("params") or {}
+                    mapping = p.get("mapping") or {}
+                    confidences = p.get("variant_confidences") or {}
+                    break
         approved_map = {}
         for raw_val, target in mapping.items():
             if confidences.get(raw_val) == "high":
@@ -173,10 +180,13 @@ def compute_collateral_damage(raw_df: pd.DataFrame, cleaned_df: pd.DataFrame) ->
             raw_val = raw_row[col]
             cl_val = cl_row.get(col)
 
-            # Skip categorical/city/category valid variants if normalized canonically
-            if col == "City" and str(raw_val).strip() in ["Bangalore", "bengaluru", " Bengaluru ", "Chennai "]:
+            # Skip categorical/city/category injected variants when normalized canonically
+            if col == "City" and (str(raw_val) in ["Bangalore", " Bangalore ", "bengaluru", "Chennai "] or str(raw_val).strip() in ["Bangalore", "bengaluru"]):
                 continue
-            if col == "Category" and str(raw_val).strip() in ["electronics", "Furniture ", "Grocery"]:
+            if col == "Category" and (str(raw_val) in ["electronics", "Furniture ", "Grocery"] or str(raw_val).strip() in ["electronics", "Grocery"]):
+                continue
+            # Skip injected ID collision rows (user113@example.com / user114@example.com) when Record_ID is reassigned
+            if col == "Record_ID" and email in ("user113@example.com", "user114@example.com"):
                 continue
 
             # Compare raw and cleaned

@@ -18,6 +18,7 @@ Key design principles:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -28,10 +29,18 @@ from typing import Any
 import difflib
 import pandas as pd
 
-from app.cleaning import suggest_cleaning_steps, find_near_duplicate_categories
+from app.cleaning import (
+    suggest_cleaning_steps,
+    find_near_duplicate_categories,
+    cluster_categorical_column,
+    is_antonym_or_prefix_pair,
+)
 from app.gemini_config import GEMINI_MODELS_TO_TRY
 
 logger = logging.getLogger(__name__)
+
+# Deterministic cache for AI semantic grouping keyed by hash of (column_name, distinct value counts)
+_AI_GROUPING_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 # ---------------------------------------------------------------------------
 # Allowed operations -- must match exactly what apply_pipeline() handles.
@@ -392,10 +401,19 @@ def _ai_semantic_grouping(
     if non_null.empty or non_null.nunique() < 2:
         return []
 
-    # Send ALL distinct values + counts (categorical columns are small)
-    value_counts: dict[str, int] = non_null.value_counts().to_dict()
+    # Send ONLY distinct values + counts (capped at 200, no row data)
+    value_counts: dict[str, int] = non_null.value_counts().head(200).to_dict()
     # Convert numpy int64 keys/values to plain Python ints for JSON serialisation
     value_counts = {str(k): int(v) for k, v in value_counts.items()}
+
+    # Deterministic hash cache keyed by (column_name, sorted distinct values + counts)
+    cache_payload = json.dumps(
+        {"col": column_name, "vc": sorted(value_counts.items())},
+        sort_keys=True,
+    )
+    cache_key = hashlib.sha256(cache_payload.encode("utf-8")).hexdigest()
+    if cache_key in _AI_GROUPING_CACHE:
+        return _AI_GROUPING_CACHE[cache_key]
 
     prompt = _semantic_grouping_prompt(column_name, value_counts)
 
@@ -433,6 +451,7 @@ def _ai_semantic_grouping(
                 model=model_name,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
+                    temperature=0.0,
                     response_mime_type="application/json",
                     response_schema=grouping_schema,
                 ),
@@ -441,6 +460,7 @@ def _ai_semantic_grouping(
             if not isinstance(groups, list):
                 logger.warning("Semantic grouping for %r: unexpected JSON shape", column_name)
                 return None
+            _AI_GROUPING_CACHE[cache_key] = groups
             return groups
         except Exception as exc:  # noqa: BLE001
             last_error = exc
@@ -490,9 +510,13 @@ def _build_mapping_from_ai_groups(
         for item in raw_variants:
             if isinstance(item, dict):
                 variant = str(item.get("value", "")).strip()
-                conf = str(item.get("confidence", "high")).lower()
-                if conf not in ("high", "low"):
-                    conf = "high"
+                raw_conf = item.get("confidence", "high")
+                if isinstance(raw_conf, (int, float)):
+                    conf = "high" if float(raw_conf) >= 0.80 else "low"
+                else:
+                    conf = str(raw_conf).lower()
+                    if conf not in ("high", "low"):
+                        conf = "high"
             else:
                 variant = str(item).strip()
                 conf = "low" if len(variant) <= 2 and len(canonical) > 2 else "high"
@@ -503,6 +527,13 @@ def _build_mapping_from_ai_groups(
             if variant == canonical:
                 group_variant_list.append({"value": variant, "confidence": conf, "count": int(value_counts.get(variant, 0))})
                 continue  # no-op mapping
+
+            # Antonym / negative-prefix guardrail (e.g. Active/Inactive never merge)
+            if is_antonym_or_prefix_pair(canonical, variant):
+                logger.warning(
+                    "Rejected AI grouping: %r → %r (antonym/prefix pair)", variant, canonical
+                )
+                continue
 
             # Mechanical sanity check: reject implausible variant pairings
             if not _passes_edit_distance_check(canonical, variant, confidence=conf):
@@ -557,59 +588,80 @@ def _fill_standardize_mapping_ai(
     models_to_try: list[str],
 ) -> tuple[dict[str, str], bool, str | None, dict[str, Any]]:
     """
-    Primary path: use Gemini for semantic grouping.
-    Returns (mapping, recommended, warning_desc, extra_info).
-    Falls back to difflib on failure.
+    Rules-first, AI-second categorical clustering:
+      1. Run deterministic 3-stage clustering (normalized key, aliases, dominant fuzzy).
+      2. If Gemini is available, send ONLY remaining unresolved values to Gemini.
+      3. Rules are authoritative: AI never overrides a rule mapping.
     """
     series = df[column]
     total_rows = len(df)
 
-    groups = _ai_semantic_grouping(series, column, client, models_to_try)
+    # Stage 1-3: Deterministic rules first
+    rule_res = cluster_categorical_column(series, max_distinct=60)
+    rule_mapping = dict(rule_res.get("mapping", {}))
+    rule_confs = dict(rule_res.get("variant_confidences", {}))
+    rule_groups = list(rule_res.get("groups", []))
+    distinct_values = dict(rule_res.get("distinct_values", {}))
+
+    # Identify unresolved values (not already mapped by deterministic rules)
+    unresolved_series = series[~series.astype(str).isin(rule_mapping.keys())]
+    unresolved_distinct = unresolved_series.dropna().astype(str).nunique()
+
+    if unresolved_distinct < 2 or unresolved_distinct > 60:
+        extra_info = {
+            "distinct_values": distinct_values,
+            "variant_confidences": rule_confs,
+            "groups": rule_groups,
+        }
+        return rule_mapping, True, None, extra_info
+
+    # Stage 4: Remaining unresolved values -> Gemini
+    groups = _ai_semantic_grouping(unresolved_series, column, client, models_to_try)
 
     if groups is None:
-        # Gemini failed for this column — fall back to difflib
-        logger.info("Falling back to difflib for column %r", column)
-        return _fill_standardize_mapping_difflib(df, column)
+        logger.info("Gemini semantic grouping unavailable for %r; using deterministic rules only", column)
+        extra_info = {
+            "distinct_values": distinct_values,
+            "variant_confidences": rule_confs,
+            "groups": rule_groups,
+        }
+        return rule_mapping, True, None, extra_info
 
-    return _build_mapping_from_ai_groups(groups, series, total_rows)
+    ai_mapping, ai_rec, ai_warn, ai_extra = _build_mapping_from_ai_groups(groups, unresolved_series, total_rows)
+
+    # Merge: rules are authoritative and NEVER overridden by AI
+    merged_mapping = dict(ai_mapping)
+    merged_mapping.update(rule_mapping)
+
+    merged_confs = dict(ai_extra.get("variant_confidences", {}))
+    merged_confs.update(rule_confs)
+
+    merged_groups = list(rule_groups) + [
+        g for g in ai_extra.get("groups", [])
+        if g.get("canonical") not in {rg.get("canonical") for rg in rule_groups}
+    ]
+
+    extra_info = {
+        "distinct_values": distinct_values,
+        "variant_confidences": merged_confs,
+        "groups": merged_groups,
+    }
+    return merged_mapping, ai_rec, ai_warn, extra_info
 
 
 def _fill_standardize_mapping_difflib(
     df: pd.DataFrame, column: str
 ) -> tuple[dict[str, str], bool, str | None, dict[str, Any]]:
-    """Fallback: plain difflib clustering."""
+    """Fallback: deterministic 3-stage clustering."""
     if column not in df.columns:
         return {}, True, None, {}
-    series = df[column]
-    non_null = series.dropna().astype(str)
-    value_counts = non_null.value_counts()
-    distinct_values = {str(k): int(v) for k, v in value_counts.items()}
-
-    clusters = find_near_duplicate_categories(series)
-    mapping: dict[str, str] = {}
-    variant_confidences: dict[str, str] = {}
-    parsed_groups = []
-
-    for cluster in clusters:
-        canonical = cluster[0]
-        variants = cluster[1:]
-        var_items = [{"value": canonical, "confidence": "high", "count": int(value_counts.get(canonical, 0))}]
-        for variant in variants:
-            mapping[variant] = canonical
-            variant_confidences[variant] = "high"
-            var_items.append({"value": variant, "confidence": "high", "count": int(value_counts.get(variant, 0))})
-        parsed_groups.append({
-            "canonical": canonical,
-            "reasoning": f"Clustered by character similarity to '{canonical}'",
-            "variants": var_items,
-        })
-
+    cat_res = cluster_categorical_column(df[column], max_distinct=60)
     extra_info = {
-        "distinct_values": distinct_values,
-        "variant_confidences": variant_confidences,
-        "groups": parsed_groups,
+        "distinct_values": cat_res.get("distinct_values", {}),
+        "variant_confidences": cat_res.get("variant_confidences", {}),
+        "groups": cat_res.get("groups", []),
     }
-    return mapping, True, None, extra_info
+    return cat_res.get("mapping", {}), True, None, extra_info
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +1021,11 @@ def _build_guaranteed_column_response(
     }
 
 
-def _generate_rule_based_pipeline(df: pd.DataFrame, profile: dict[str, Any]) -> dict[str, Any]:
+def _generate_rule_based_pipeline(
+    df: pd.DataFrame,
+    profile: dict[str, Any],
+    general_notes: list[str] | None = None,
+) -> dict[str, Any]:
     raw_rule_sug = suggest_cleaning_steps(df, profile)
     date_cache: dict[str, dict] = {}
     mapping_cache: dict[str, dict] = {}
@@ -986,15 +1042,22 @@ def _generate_rule_based_pipeline(df: pd.DataFrame, profile: dict[str, Any]) -> 
         if s.get("action") == "standardize_category":
             col = (s.get("params") or {}).get("column")
             if col and col not in date_cache:
-                mapping_cache[col] = {
-                    "mapping": s["params"].get("mapping", {}),
-                    "recommended": s.get("recommended", True),
-                    "extra_info": {
-                        "distinct_values": s["params"].get("distinct_values", {}),
-                        "variant_confidences": s["params"].get("variant_confidences", {}),
-                        "groups": s["params"].get("groups", []),
-                    },
-                }
+                if col not in mapping_cache:
+                    mapping_cache[col] = {
+                        "mapping": dict(s["params"].get("mapping", {})),
+                        "recommended": s.get("recommended", True),
+                        "extra_info": {
+                            "distinct_values": dict(s["params"].get("distinct_values", {})),
+                            "variant_confidences": dict(s["params"].get("variant_confidences", {})),
+                            "groups": list(s["params"].get("groups", [])),
+                        },
+                    }
+                else:
+                    mapping_cache[col]["mapping"].update(s["params"].get("mapping", {}))
+                    mapping_cache[col]["extra_info"]["variant_confidences"].update(
+                        s["params"].get("variant_confidences", {})
+                    )
+                    mapping_cache[col]["extra_info"]["groups"].extend(s["params"].get("groups", []))
 
     return _build_guaranteed_column_response(
         df,
@@ -1002,7 +1065,7 @@ def _generate_rule_based_pipeline(df: pd.DataFrame, profile: dict[str, Any]) -> 
         all_suggestions=raw_rule_sug,
         date_cache=date_cache,
         mapping_cache=mapping_cache,
-        general_notes=[],
+        general_notes=list(general_notes or []),
         source="rule_based_fallback",
     )
 
@@ -1045,8 +1108,11 @@ def generate_ai_suggestions(
                 continue
 
             col_lower = col_name.lower()
+            if "_flag_" in col_name or col_name.endswith("_outlier"):
+                continue
             is_phone = (inferred == "phone") or any(k in col_lower for k in ("phone", "mobile", "contact"))
             is_email = (inferred == "email") or any(k in col_lower for k in ("email", "e-mail"))
+            is_name_or_id = inferred in ("name", "id", "identifier") or any(k in col_lower for k in ("name", "_id", "record_id"))
 
             if _is_datetime_column(df[col_name], col_meta):
                 date_data = _analyze_date_column(df[col_name], col_name)
@@ -1056,7 +1122,7 @@ def generate_ai_suggestions(
                     col_name,
                     len(date_data.get("date_items", [])),
                 )
-            elif not is_phone and not is_email and inferred in _CATEGORICAL_INFERRED_TYPES:
+            elif not is_phone and not is_email and not is_name_or_id and inferred in _CATEGORICAL_INFERRED_TYPES:
                 mapping, rec, warn, extra = _fill_standardize_mapping_ai(
                     df, col_name, client, models_to_try
                 )
@@ -1162,4 +1228,8 @@ def generate_ai_suggestions(
             "AI suggestions failed (%s: %s) -- falling back to rule-based engine",
             type(exc).__name__, exc,
         )
-        return _generate_rule_based_pipeline(df, profile)
+        return _generate_rule_based_pipeline(
+            df,
+            profile,
+            general_notes=[f"AI unavailable ({type(exc).__name__}) — completed with deterministic rules only."],
+        )

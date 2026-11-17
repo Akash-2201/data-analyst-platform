@@ -28,7 +28,7 @@
 | STEP 0 | Baseline + Scoring Harness | DONE | 24.5% | 31 cells | PASS | PASS | `clean-eval: baseline + harness` |
 | STEP 1 | Safe Foundations (whitespace, tokens, numbers, Int64) | DONE | 42.9% | 0 cells | PASS | PASS | `clean: foundations` |
 | STEP 2 | Type Rules (Name, Email, Phone, Date, Bounds) | DONE | 81.6% | 0 cells | PASS | PASS | `clean: type rules` |
-| STEP 3 | Categorical / City / Category Clustering | NOT_STARTED | - | - | - | - | - |
+| STEP 3 | Categorical / City / Category Clustering | DONE | 95.9% | 0 cells | PASS | PASS | `clean: clustering` |
 | STEP 4 | Duplicates, Keys, Row Safety | NOT_STARTED | - | - | - | - | - |
 | STEP 5 | Cleaning Log + Flag Hygiene | NOT_STARTED | - | - | - | - | - |
 | STEP 6 | Hardening & Final Verification | NOT_STARTED | - | - | - | - | - |

@@ -341,64 +341,273 @@ def parse_explicit_date(val: Any, date_order: str = "DMY") -> tuple[str | None, 
     return out_str, "valid", (out_str != str(val))
 
 
-def find_near_duplicate_categories(
-    series: pd.Series, cutoff: float = 0.6
-) -> list[list[str]]:
-    """Cluster near-duplicate text values in a Series using Python's difflib.
-    Returns a list of clusters, where each cluster is [canonical_variant, variant2, variant3, ...].
-    Canonical variant is picked as the most frequent string in the data.
+CATEGORY_ALIASES: dict[str, str] = {
+    "bangalore": "bengaluru",
+    "bombay": "mumbai",
+    "madras": "chennai",
+    "calcutta": "kolkata",
+    "gurgaon": "gurugram",
+    "mysore": "mysuru",
+    "cochin": "kochi",
+    "trivandrum": "thiruvananthapuram",
+    "poona": "pune",
+    "baroda": "vadodara",
+    "benares": "varanasi",
+    "banaras": "varanasi",
+    "mangalore": "mangaluru",
+    "hubli": "hubballi",
+    "belgaum": "belagavi",
+    "cawnpore": "kanpur",
+    "alleppey": "alappuzha",
+    "pondicherry": "puducherry",
+    "orissa": "odisha",
+    "uttaranchal": "uttarakhand",
+}
+
+_ANTONYM_PREFIXES: tuple[str, ...] = (
+    "in", "un", "im", "il", "ir", "non", "dis", "de", "anti",
+)
+
+
+def is_antonym_or_prefix_pair(a: str, b: str) -> bool:
+    """Return True if two strings are known opposites or negative-prefix pairs (e.g. Active/Inactive)."""
+    la = re.sub(r"[^a-z0-9]", "", str(a).strip().lower())
+    lb = re.sub(r"[^a-z0-9]", "", str(b).strip().lower())
+    if not la or not lb or la == lb:
+        return False
+    if (la, lb) in OPPOSITES or (lb, la) in OPPOSITES:
+        return True
+    for pfx in _ANTONYM_PREFIXES:
+        if (la == pfx + lb and len(lb) >= 3) or (lb == pfx + la and len(la) >= 3):
+            return True
+    return False
+
+
+def _levenshtein_distance(a: str, b: str) -> int:
+    """Exact Levenshtein edit distance (stdlib only, no extra deps)."""
+    if a == b:
+        return 0
+    if len(a) < len(b):
+        a, b = b, a
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr.append(min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost))
+        prev = curr
+    return prev[-1]
+
+
+def _token_sort_ratio(a: str, b: str) -> float:
+    """Token-sorted similarity ratio in 0..100."""
+    ta = " ".join(sorted(re.findall(r"[a-z0-9]+", str(a).lower())))
+    tb = " ".join(sorted(re.findall(r"[a-z0-9]+", str(b).lower())))
+    if not ta or not tb:
+        return 0.0
+    return difflib.SequenceMatcher(None, ta, tb).ratio() * 100.0
+
+
+def _normalize_cat_key(s: str) -> str:
+    """Lowercase and strip all punctuation and spaces."""
+    return re.sub(r"[^a-z0-9]", "", normalize_whitespace_string(str(s)).lower())
+
+
+def _singularize_key(k: str) -> str:
+    """Light singular/plural folding ('groceries' -> 'grocery', 'electronics' stays 'electronic' if paired)."""
+    if len(k) > 4 and k.endswith("ies"):
+        return k[:-3] + "y"
+    if len(k) > 4 and k.endswith(("ses", "xes", "zes", "ches", "shes")):
+        return k[:-2]
+    if len(k) > 3 and k.endswith("s") and not k.endswith("ss"):
+        return k[:-1]
+    return k
+
+
+def cluster_categorical_column(
+    series: pd.Series, max_distinct: int = 60
+) -> dict[str, Any]:
+    """Deterministic 3-stage categorical clustering (rules first):
+      1. Normalized key (lowercase, strip punct/spaces) + light singular/plural folding.
+      2. Alias dictionary (CATEGORY_ALIASES).
+      3. Fuzzy match against DOMINANT values only (target freq >= 3x source freq AND
+         edit distance <= 2 or token-sort ratio >= 90 AND not antonym/prefix pair).
+    Canonical form = most frequent surface form after trimming (tie -> Title Case).
+    Values already equal to canonical are never touched.
     """
     non_null = series.dropna().astype(str)
     if non_null.empty:
-        return []
+        return {"mapping": {}, "clusters": [], "groups": [], "distinct_values": {}, "variant_confidences": {}}
 
-    val_counts = non_null.value_counts()
-    sorted_vals = [str(v) for v in val_counts.index if len(str(v).strip()) > 0]
-    if len(sorted_vals) < 2:
-        return []
+    raw_counts = non_null.value_counts()
+    val_counts: dict[str, int] = {
+        str(k): int(v)
+        for k, v in raw_counts.items()
+        if normalize_whitespace_string(str(k)) and normalize_whitespace_string(str(k)).lower() not in MISSING_TOKENS
+    }
+    trimmed_distinct = {normalize_whitespace_string(k) for k in val_counts}
+    if len(val_counts) < 2 or len(trimmed_distinct) > max_distinct:
+        return {"mapping": {}, "clusters": [], "groups": [], "distinct_values": val_counts, "variant_confidences": {}}
 
-    clusters: list[list[str]] = []
-    assigned: set[str] = set()
-
-    for canonical in sorted_vals:
-        if canonical in assigned:
+    # Stage 1a: Group by normalized key (lowercase, strip punctuation & spaces)
+    key_groups: dict[str, dict[str, Any]] = {}
+    for raw_v, cnt in val_counts.items():
+        nk = _normalize_cat_key(raw_v)
+        if not nk:
             continue
+        if nk not in key_groups:
+            key_groups[nk] = {"raws": [], "count": 0, "reasons": set(), "alias_target": False}
+        key_groups[nk]["raws"].append(raw_v)
+        key_groups[nk]["count"] += cnt
 
-        canonical_clean = canonical.strip().lower()
-        possibilities = [v for v in sorted_vals if v not in assigned and v != canonical]
-        if not possibilities:
+    # Stage 1b: Light singular/plural folding across distinct normalized keys
+    sing_buckets: dict[str, list[str]] = {}
+    for nk in key_groups:
+        sk = _singularize_key(nk)
+        sing_buckets.setdefault(sk, []).append(nk)
+
+    for sk, nks in sing_buckets.items():
+        if len(nks) <= 1:
             continue
-
-        possibility_map = {}
-        for p in possibilities:
-            p_clean = p.strip().lower()
-            if (canonical_clean, p_clean) in OPPOSITES:
+        nks_sorted = sorted(nks, key=lambda k: key_groups[k]["count"], reverse=True)
+        dominant_k = nks_sorted[0]
+        for other_k in nks_sorted[1:]:
+            if is_antonym_or_prefix_pair(dominant_k, other_k):
                 continue
-            if p_clean not in possibility_map:
-                possibility_map[p_clean] = p
+            key_groups[dominant_k]["raws"].extend(key_groups[other_k]["raws"])
+            key_groups[dominant_k]["count"] += key_groups[other_k]["count"]
+            key_groups[dominant_k]["reasons"].add("singular/plural folding")
+            del key_groups[other_k]
 
-        if not possibility_map:
+    # Stage 2: Alias dictionary (CATEGORY_ALIASES)
+    alias_merges: list[tuple[str, str]] = []
+    for nk in list(key_groups.keys()):
+        if nk in CATEGORY_ALIASES:
+            tgt = CATEGORY_ALIASES[nk]
+            if tgt in key_groups and tgt != nk:
+                alias_merges.append((nk, tgt))
+
+    for src_k, tgt_k in alias_merges:
+        if src_k in key_groups and tgt_k in key_groups:
+            key_groups[tgt_k]["raws"].extend(key_groups[src_k]["raws"])
+            key_groups[tgt_k]["count"] += key_groups[src_k]["count"]
+            key_groups[tgt_k]["reasons"].add("alias dictionary")
+            key_groups[tgt_k]["alias_target"] = True
+            del key_groups[src_k]
+
+    # Stage 3: Fuzzy match against DOMINANT values only
+    # Sort keys by count descending so dominant groups are checked first
+    keys_by_freq = sorted(key_groups.keys(), key=lambda k: key_groups[k]["count"], reverse=True)
+    merged_keys: set[str] = set()
+    for src_k in reversed(keys_by_freq):
+        if src_k in merged_keys or src_k not in key_groups:
+            continue
+        if len(src_k) < 4:
+            continue
+        src_cnt = key_groups[src_k]["count"]
+        src_rep = normalize_whitespace_string(key_groups[src_k]["raws"][0])
+        best_tgt = None
+        best_dist = 999
+        best_tgt_cnt = -1
+
+        for tgt_k in keys_by_freq:
+            if tgt_k == src_k or tgt_k in merged_keys or tgt_k not in key_groups:
+                continue
+            if len(tgt_k) < 4:
+                continue
+            tgt_cnt = key_groups[tgt_k]["count"]
+            # Require target frequency >= 3x source frequency
+            if tgt_cnt < 3 * src_cnt:
+                continue
+            if is_antonym_or_prefix_pair(src_k, tgt_k):
+                continue
+            dist = _levenshtein_distance(src_k, tgt_k)
+            tgt_rep = normalize_whitespace_string(key_groups[tgt_k]["raws"][0])
+            tsr = _token_sort_ratio(src_rep, tgt_rep)
+            if dist <= 2 or tsr >= 90.0:
+                if dist < best_dist or (dist == best_dist and tgt_cnt > best_tgt_cnt):
+                    best_dist = dist
+                    best_tgt = tgt_k
+                    best_tgt_cnt = tgt_cnt
+
+        if best_tgt is not None:
+            key_groups[best_tgt]["raws"].extend(key_groups[src_k]["raws"])
+            key_groups[best_tgt]["count"] += key_groups[src_k]["count"]
+            key_groups[best_tgt]["reasons"].add("fuzzy match to dominant value")
+            del key_groups[src_k]
+            merged_keys.add(src_k)
+
+    # Pick canonical surface form for each group that has > 1 raw variant (or trimmed != raw)
+    mapping: dict[str, str] = {}
+    variant_confidences: dict[str, str] = {}
+    clusters: list[list[str]] = []
+    groups_meta: list[dict[str, Any]] = []
+
+    for nk, g in sorted(key_groups.items(), key=lambda kv: kv[1]["count"], reverse=True):
+        raws = g["raws"]
+        # Count trimmed surface forms
+        trimmed_counts: dict[str, int] = {}
+        for rv in raws:
+            tv = normalize_whitespace_string(rv)
+            trimmed_counts[tv] = trimmed_counts.get(tv, 0) + val_counts.get(rv, 0)
+
+        # If alias_target, prefer trimmed forms whose normalized key matches the target key nk
+        candidate_forms = list(trimmed_counts.keys())
+        if g["alias_target"]:
+            target_forms = [tv for tv in candidate_forms if _normalize_cat_key(tv) == nk]
+            if target_forms:
+                candidate_forms = target_forms
+
+        # Canonical = most frequent trimmed surface form; tie -> Title Case
+        canonical = max(
+            candidate_forms,
+            key=lambda tv: (trimmed_counts[tv], 1 if tv.istitle() else 0, tv),
+        )
+        # If top candidates tied and none is Title Case (e.g. all lowercase vs all uppercase), use Title Case
+        max_cnt = trimmed_counts[canonical]
+        tied = [tv for tv in candidate_forms if trimmed_counts[tv] == max_cnt]
+        if len(tied) > 1 and not canonical.istitle():
+            canonical = canonical.title()
+
+        variants = [rv for rv in raws if rv != canonical]
+        if not variants:
             continue
 
-        matches_clean = difflib.get_close_matches(
-            canonical_clean, list(possibility_map.keys()), n=len(possibility_map), cutoff=cutoff
-        )
+        for rv in variants:
+            mapping[rv] = canonical
+            variant_confidences[rv] = "high"
 
-        cluster = [canonical]
-        for m_clean in matches_clean:
-            for p in possibilities:
-                p_clean = p.strip().lower()
-                if (canonical_clean, p_clean) in OPPOSITES:
-                    continue
-                if p not in assigned and p != canonical and p.strip().lower() == m_clean:
-                    cluster.append(p)
-                    assigned.add(p)
+        cluster_list = [canonical] + variants
+        clusters.append(cluster_list)
+        reason_str = ", ".join(sorted(g["reasons"])) if g["reasons"] else "normalized whitespace/case"
+        groups_meta.append({
+            "canonical": canonical,
+            "reasoning": f"Deterministic clustering ({reason_str}) to '{canonical}'",
+            "variants": [
+                {"value": v, "confidence": "high", "count": int(val_counts.get(v, 0))}
+                for v in ([canonical] if canonical in val_counts else []) + variants
+            ],
+        })
 
-        if len(cluster) > 1:
-            assigned.add(canonical)
-            clusters.append(cluster)
+    return {
+        "mapping": mapping,
+        "clusters": clusters,
+        "groups": groups_meta,
+        "distinct_values": val_counts,
+        "variant_confidences": variant_confidences,
+    }
 
-    return clusters
+
+def find_near_duplicate_categories(
+    series: pd.Series, cutoff: float = 0.6
+) -> list[list[str]]:
+    """Cluster near-duplicate text values in a Series using deterministic 3-stage rules.
+    Returns a list of clusters, where each cluster is [canonical_variant, variant2, variant3, ...].
+    """
+    res = cluster_categorical_column(series)
+    return res["clusters"]
 
 
 find_near_duplicate_category_clusters = find_near_duplicate_categories
@@ -709,22 +918,21 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         "severity": "low",
                     })
 
-                # 1b. Fuzzy category consistency (standardize_category)
+                # 1b. Deterministic 3-stage category consistency (standardize_category)
                 has_category_clusters = False
                 is_date_col = inferred_type in ("datetime", "date") or effective_type == "date" or any(k in col_name.lower() for k in ("date", "dob"))
                 is_non_cat = is_date_col or is_name_col or is_email_col or is_phone_col or effective_type in ("id", "latitude", "longitude", "age", "quantity", "currency", "salary")
                 if not is_non_cat and inferred_type not in ("numeric", "non_negative_numeric", "identifier", "email") and (
                     inferred_type in ("categorical", "text")
-                    or (str(col_series.dtype) == "object" and col_series.nunique() < 50)
+                    or (str(col_series.dtype) == "object" and col_series.nunique() <= 60)
                 ):
-                    clusters = find_near_duplicate_categories(col_series)
-                    val_counts = non_null_str.value_counts().to_dict()
-                    val_counts = {str(k): int(v) for k, v in val_counts.items()}
-                    for cluster in clusters:
-                        canonical = cluster[0]
-                        variants = cluster[1:]
-                        mapping = {v: canonical for v in variants}
-                        variant_str = ", ".join(variants)
+                    cat_res = cluster_categorical_column(col_series, max_distinct=60)
+                    mapping = cat_res["mapping"]
+                    groups_meta = cat_res["groups"]
+                    val_counts = cat_res["distinct_values"]
+                    variant_confidences = cat_res["variant_confidences"]
+                    if mapping:
+                        sample_pairs = [f"'{k}' → '{v}'" for k, v in list(mapping.items())[:4]]
                         suggestions.append({
                             "id": str(uuid.uuid4()),
                             "action": "standardize_category",
@@ -732,15 +940,12 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                                 "column": col_name,
                                 "mapping": mapping,
                                 "distinct_values": val_counts,
-                                "variant_confidences": {v: "high" for v in variants},
-                                "groups": [{
-                                    "canonical": canonical,
-                                    "reasoning": f"Clustered by character similarity to '{canonical}'",
-                                    "variants": [{"value": v, "confidence": "high", "count": int(val_counts.get(v, 0))} for v in cluster],
-                                }],
+                                "variant_confidences": variant_confidences,
+                                "groups": groups_meta,
                             },
-                            "description": f"{len(cluster)} spellings of '{canonical}' found ({variant_str}) — standardize to one?",
+                            "description": f"Standardize {len(mapping)} category variant{'s' if len(mapping) > 1 else ''} in '{col_name}' ({', '.join(sample_pairs)})",
                             "severity": "medium",
+                            "recommended": True,
                         })
                         has_category_clusters = True
 
