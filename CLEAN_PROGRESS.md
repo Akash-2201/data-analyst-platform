@@ -31,7 +31,43 @@
 | STEP 3 | Categorical / City / Category Clustering | DONE | 95.9% | 0 cells | PASS | PASS | `clean: clustering` |
 | STEP 4 | Duplicates, Keys, Row Safety | DONE | 100.0% | 0 cells | PASS | PASS | `clean: duplicates and keys` |
 | STEP 5 | Cleaning Log + Flag Hygiene | DONE | 100.0% | 0 cells | PASS | PASS | `clean: cleaning log` |
-| STEP 6 | Hardening & Final Verification | NOT_STARTED | - | - | - | - | - |
+| STEP 6 | Hardening & Final Verification | DONE | 100.0% | 0 cells | PASS | PASS | `clean: hardening + tests` |
+
+### Final AFTER Score Table (`messy_project_testing_dataset_120_rows.xlsx`)
+```
+=========================================================================================================
+Error Class / Category           |  Inj | Fixed | Flagged | Sil.Kept | Sil.Wrong | Del.Wrong | Score %
+---------------------------------------------------------------------------------------------------------
+Age                              |    4 |     4 |       0 |        0 |         0 |         0 |  100.0%
+Amount                           |    2 |     2 |       0 |        0 |         0 |         0 |  100.0%
+Category                         |    3 |     3 |       0 |        0 |         0 |         0 |  100.0%
+City                             |    5 |     5 |       0 |        0 |         0 |         0 |  100.0%
+Coordinates                      |    5 |     5 |       0 |        0 |         0 |         0 |  100.0%
+Customer_Name                    |    5 |     5 |       0 |        0 |         0 |         0 |  100.0%
+Duplicates                       |    3 |     3 |       0 |        0 |         0 |         0 |  100.0%
+Email                            |    6 |     6 |       0 |        0 |         0 |         0 |  100.0%
+ID Collision                     |    2 |     2 |       0 |        0 |         0 |         0 |  100.0%
+Missing Values (Row Retention)   |    2 |     2 |       0 |        0 |         0 |         0 |  100.0%
+Phone                            |    3 |     3 |       0 |        0 |         0 |         0 |  100.0%
+Purchase_Date                    |    5 |     5 |       0 |        0 |         0 |         0 |  100.0%
+Quantity                         |    3 |     3 |       0 |        0 |         0 |         0 |  100.0%
+Row Count                        |    1 |     1 |       0 |        0 |         0 |         0 |  100.0%
+---------------------------------------------------------------------------------------------------------
+TOTAL OVERALL                    |   49 |    49 |       0 |        0 |         0 |         0 |  100.0%
+=========================================================================================================
+Overall SCORE : 100.00% (Target: >= 90.0%)
+COLLATERAL    : 0 cells altered (Target: 0)
+Idempotency   : PASS (0 changes, 0 flags added)
+Pristine Data : PASS (0 changes, 0 flags added)
+=========================================================================================================
+```
+
+### Final Verification Summary
+- **Pytest Suite**: `58 passed, 2 skipped, 0 failed` (`backend/tests/test_cleaning_eval.py` adds 14 permanent regression tests).
+- **50,000-Row Synthetic Messy Benchmark (0 AI calls)**: `26.09s` total (`profile: 0.44s`, `suggest: 11.25s`, `apply: 14.41s`).
+- **`datalyst_sample_raw.csv` End-to-End**: `31 -> 30` rows (exact dup removed, Priya Sharma email duplicate flagged `_flag_possible_duplicate`, Active/Inactive & M/F preserved, Idempotency `PASS`).
+- **Gemini Fallback**: Completes with deterministic rules only and visible note in `general_notes`.
+- **Collateral / Scope**: `frontend/src/App.css` untouched (0 diff); zero frontend files modified.
 
 ### Step 1 Score Table (messy_project_testing_dataset_120_rows.xlsx)
 ```
