@@ -152,11 +152,13 @@ def compute_collateral_damage(raw_df: pd.DataFrame, cleaned_df: pd.DataFrame) ->
     for _, raw_row in raw_unique.iterrows():
         rid = raw_row["Record_ID"]
         # Find corresponding row in cleaned_df
-        # For reassigned IDs, match by email
+        # Match by email first (to handle colliding IDs cleanly), then by Record_ID
         email = str(raw_row.get("Email", "")).strip()
-        cleaned_matches = cleaned_df[cleaned_df["Record_ID"] == rid]
-        if cleaned_matches.empty:
+        cleaned_matches = pd.DataFrame()
+        if email and email.lower() not in ["", "nan", "none"]:
             cleaned_matches = cleaned_df[cleaned_df["Email"].astype(str).str.strip() == email]
+        if cleaned_matches.empty:
+            cleaned_matches = cleaned_df[cleaned_df["Record_ID"] == rid]
 
         if cleaned_matches.empty:
             # Row was dropped - if it was not an exact duplicate, that's already counted in row count/cases

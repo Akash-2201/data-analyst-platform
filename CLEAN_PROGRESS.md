@@ -25,38 +25,38 @@
 
 | Step | Description | Status | Score | Collateral | Idempotent | Pristine | Commit |
 |------|-------------|--------|-------|------------|------------|----------|--------|
-| STEP 0 | Baseline + Scoring Harness | DONE | 24.5% | 31 cells | PASS | PASS | clean-eval: baseline + harness |
-| STEP 1 | Safe Foundations (whitespace, tokens, numbers, Int64) | NOT_STARTED | - | - | - | - | - |
+| STEP 0 | Baseline + Scoring Harness | DONE | 24.5% | 31 cells | PASS | PASS | `clean-eval: baseline + harness` |
+| STEP 1 | Safe Foundations (whitespace, tokens, numbers, Int64) | DONE | 42.9% | 0 cells | PASS | PASS | `clean: foundations` |
 | STEP 2 | Type Rules (Name, Email, Phone, Date, Bounds) | NOT_STARTED | - | - | - | - | - |
 | STEP 3 | Categorical / City / Category Clustering | NOT_STARTED | - | - | - | - | - |
 | STEP 4 | Duplicates, Keys, Row Safety | NOT_STARTED | - | - | - | - | - |
 | STEP 5 | Cleaning Log + Flag Hygiene | NOT_STARTED | - | - | - | - | - |
 | STEP 6 | Hardening & Final Verification | NOT_STARTED | - | - | - | - | - |
 
-### Baseline Score Table (messy_project_testing_dataset_120_rows.xlsx)
+### Step 1 Score Table (messy_project_testing_dataset_120_rows.xlsx)
 ```
 =========================================================================================================
 Error Class / Category           |  Inj | Fixed | Flagged | Sil.Kept | Sil.Wrong | Del.Wrong | Score %
 ---------------------------------------------------------------------------------------------------------
-Age                              |    4 |     1 |       0 |        3 |         0 |         0 |   25.0%
+Age                              |    4 |     2 |       0 |        2 |         0 |         0 |   50.0%
 Amount                           |    2 |     0 |       1 |        1 |         0 |         0 |   50.0%
 Category                         |    3 |     0 |       0 |        3 |         0 |         0 |    0.0%
-City                             |    5 |     0 |       0 |        4 |         1 |         0 |    0.0%
-Coordinates                      |    5 |     0 |       0 |        5 |         0 |         0 |    0.0%
+City                             |    5 |     1 |       0 |        4 |         0 |         0 |   20.0%
+Coordinates                      |    5 |     1 |       0 |        4 |         0 |         0 |   20.0%
 Customer_Name                    |    5 |     1 |       0 |        1 |         3 |         0 |   20.0%
 Duplicates                       |    3 |     3 |       0 |        0 |         0 |         0 |  100.0%
-Email                            |    6 |     1 |       0 |        3 |         0 |         2 |   16.7%
+Email                            |    6 |     3 |       0 |        3 |         0 |         0 |   50.0%
 ID Collision                     |    2 |     0 |       0 |        2 |         0 |         0 |    0.0%
-Missing Values (Row Retention)   |    2 |     0 |       0 |        0 |         0 |         2 |    0.0%
+Missing Values (Row Retention)   |    2 |     2 |       0 |        0 |         0 |         0 |  100.0%
 Phone                            |    3 |     0 |       0 |        3 |         0 |         0 |    0.0%
 Purchase_Date                    |    5 |     3 |       0 |        2 |         0 |         0 |   60.0%
-Quantity                         |    3 |     0 |       2 |        1 |         0 |         0 |   66.7%
-Row Count                        |    1 |     0 |       0 |        0 |         0 |         1 |    0.0%
+Quantity                         |    3 |     2 |       1 |        0 |         0 |         0 |  100.0%
+Row Count                        |    1 |     1 |       0 |        0 |         0 |         0 |  100.0%
 ---------------------------------------------------------------------------------------------------------
-TOTAL OVERALL                    |   49 |     9 |       3 |       28 |         4 |         5 |   24.5%
+TOTAL OVERALL                    |   49 |    19 |       2 |       25 |         3 |         0 |   42.9%
 =========================================================================================================
-Overall SCORE : 24.49% (Target: >= 90.0%)
-COLLATERAL    : 31 cells altered (Target: 0)
+Overall SCORE : 42.86% (Target: >= 90.0%)
+COLLATERAL    : 0 cells altered (Target: 0)
 Idempotency   : PASS (0 changes, 0 flags added)
 Pristine Data : PASS (0 changes, 0 flags added)
 =========================================================================================================

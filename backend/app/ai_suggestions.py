@@ -41,6 +41,7 @@ ALLOWED_OPERATIONS: set[str] = {
     "drop_column",
     "drop_missing",
     "fill_missing",
+    "flag_missing",
     "trim_whitespace",
     "normalize_case",
     "standardize_category",

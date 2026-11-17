@@ -854,8 +854,13 @@ BOOLEAN_MAP: dict[str, str] = {
 
 def validate_boolean(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
     config = config or {}
-    # Schema should define whether 1/0 means Yes/No
-    use_true_false = config.get("use_true_false", False)
+    use_true_false = config.get("use_true_false", None)
+    if use_true_false is None:
+        sample_lowers = {str(v).strip().lower() for v in series.dropna().iloc[:50]}
+        if any(v in ("true", "false") for v in sample_lowers) or series.dtype == bool:
+            use_true_false = True
+        else:
+            use_true_false = False
     issues: list[ValidationIssue] = []
 
     true_val = "True" if use_true_false else "Yes"

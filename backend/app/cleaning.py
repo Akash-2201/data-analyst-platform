@@ -96,22 +96,92 @@ COLUMN_TYPE_RULES: dict[str, callable] = {
     "id": _make_type_adapter(_vr_validate_id),
 }
 
+UNITS_DICT: dict[str, int] = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19
+}
+TENS_DICT: dict[str, int] = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
+}
+SCALES_DICT: dict[str, int] = {"hundred": 100, "thousand": 1000, "million": 1000000}
+
+MISSING_TOKENS: set[str] = {
+    "", "na", "n/a", "n.a.", "null", "none", "nan", "-", "?", "unknown", "not available", "n/d", "nil"
+}
+
+
+def words_to_number(s: str) -> int | None:
+    """Parse English number words (one ... ninety-nine, hundred, thousand) into an integer."""
+    if not isinstance(s, str):
+        return None
+    cleaned = s.lower().replace("-", " ").strip()
+    tokens = cleaned.split()
+    if not tokens:
+        return None
+    total = 0
+    current = 0
+    matched = False
+    for tok in tokens:
+        if tok in UNITS_DICT:
+            current += UNITS_DICT[tok]
+            matched = True
+        elif tok in TENS_DICT:
+            current += TENS_DICT[tok]
+            matched = True
+        elif tok in SCALES_DICT:
+            matched = True
+            scale = SCALES_DICT[tok]
+            if current == 0:
+                current = 1
+            if scale == 100:
+                current *= 100
+            else:
+                total += current * scale
+                current = 0
+        elif tok == "and":
+            continue
+        else:
+            return None
+    if not matched:
+        return None
+    return total + current
+
+
+def normalize_whitespace_string(s: str) -> str:
+    """Strip NBSP, zero-width chars, leading/trailing whitespace, and collapse inner space runs."""
+    if not isinstance(s, str):
+        s = str(s)
+    s = re.sub(r"[\u00a0\u200b\ufeff\u200e\u200f]", "", s)
+    s = re.sub(r"[ \t\r\n]+", " ", s)
+    return s.strip()
 
 
 def clean_numeric_value(val: Any) -> Any:
-    """Normalize numeric values by stripping currency symbols, commas, and whitespace."""
+    """Normalize numeric values by stripping currency symbols, commas, and whitespace, parsing number words."""
     if val is None or pd.isna(val):
         return None
     if isinstance(val, (int, float)):
         return val
-    s = str(val).strip()
-    if not s or s.lower() in ("nan", "none", "null", "n/a", "na", "-"):
+    s = normalize_whitespace_string(str(val))
+    if not s or s.lower() in MISSING_TOKENS:
         return None
+
+    # Check for English number words (e.g. Twenty -> 20, Ten -> 10)
+    word_num = words_to_number(s)
+    if word_num is not None:
+        return word_num
+
     # Check for negative format: leading minus, negative sign, or parentheses e.g. (1,000)
     is_neg = False
     if (s.startswith("(") and s.endswith(")")) or s.startswith("-") or ("-" in s and not re.search(r"\d-\d", s)):
         is_neg = True
-    cleaned = re.sub(r"[^\d.]", "", s)
+
+    # Strip currency words and symbols
+    s_clean = re.sub(r"(?i)\b(rs|inr|usd|eur|gbp)\.?\s*", "", s)
+    s_clean = re.sub(r"[$€£₹¥%]", "", s_clean).strip()
+
+    cleaned = re.sub(r"[^\d.]", "", s_clean)
     if not cleaned or cleaned == ".":
         return None
     try:
@@ -241,16 +311,14 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "severity": "high",
                 })
             elif is_pii_col:
-                # PII columns: only offer drop_missing (never fill with a
-                # fabricated or mode-copied real value)
+                # PII columns: NEVER drop rows (G2 hard gate). Leave as null and flag.
                 suggestions.append({
                     "id": str(uuid.uuid4()),
-                    "action": "drop_missing",
+                    "action": "flag_missing",
                     "params": {"column": col_name},
                     "description": (
-                        f"Drop {missing_count} row{'s' if missing_count > 1 else ''} "
-                        f"with missing '{col_name}' (unique-per-person column — "
-                        f"filling with mode would fabricate data)"
+                        f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} "
+                        f"in '{col_name}' (unique-per-person column — row retained as null)"
                     ),
                     "severity": "medium",
                 })
@@ -260,18 +328,34 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
             ):
                 suggestions.append({
                     "id": str(uuid.uuid4()),
+                    "action": "flag_missing",
+                    "params": {"column": col_name},
+                    "description": f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}'",
+                    "severity": "medium",
+                })
+                suggestions.append({
+                    "id": str(uuid.uuid4()),
                     "action": "fill_missing",
                     "params": {"column": col_name, "strategy": "median"},
                     "description": f"Fill {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}' with median",
-                    "severity": "medium",
+                    "severity": "low",
+                    "recommended": False,
                 })
             else:
+                suggestions.append({
+                    "id": str(uuid.uuid4()),
+                    "action": "flag_missing",
+                    "params": {"column": col_name},
+                    "description": f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}'",
+                    "severity": "medium",
+                })
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "fill_missing",
                     "params": {"column": col_name, "strategy": "mode"},
                     "description": f"Fill {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}' with mode",
-                    "severity": "medium",
+                    "severity": "low",
+                    "recommended": False,
                 })
 
         # Centralised per-type validation via COLUMN_TYPE_RULES registry.
@@ -292,6 +376,16 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
             flagged_items = rule_fn(col_series, col_name)
             if flagged_items:
                 action_name = f"flag_invalid_{effective_type}"
+                sample_details = ""
+                raw_samples = []
+                for it in flagged_items:
+                    rv = it.get("raw_value")
+                    if rv is None:
+                        rv = it.get("value")
+                    if pd.notna(rv) and str(rv).strip():
+                        raw_samples.append(str(rv).strip())
+                if raw_samples:
+                    sample_details = f" ({', '.join(raw_samples[:4])})"
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": action_name,
@@ -299,7 +393,7 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "description": (
                         f"Flag {len(flagged_items)} {effective_type} value"
                         f"{'s' if len(flagged_items) > 1 else ''}"
-                        f" with invalid format in '{col_name}'"
+                        f" with invalid format in '{col_name}'{sample_details}"
                     ),
                     "severity": "medium",
                     "recommended": True,
@@ -309,7 +403,9 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
 
         # Phase 3a & 4: Non-numeric text values or formatted numbers in numeric-typed columns (excluding phone)
         if not is_phone_col and not is_email_col and (
-            inferred_type in ("numeric", "non_negative_numeric", "identifier") or pd.api.types.is_numeric_dtype(col_series)
+            inferred_type in ("numeric", "non_negative_numeric", "identifier", "currency", "salary", "age", "integer", "float")
+            or effective_type in ("numeric", "non_negative_numeric", "currency", "salary", "age", "integer", "float")
+            or pd.api.types.is_numeric_dtype(col_series)
         ):
             non_null = col_series.dropna()
             if not non_null.empty:
@@ -368,8 +464,11 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                             "severity": "medium",
                         })
 
-        # Phase 3b: Negative values in non_negative_numeric columns (excluding phone)
-        if not is_phone_col and not is_email_col and inferred_type == "non_negative_numeric":
+        # Phase 3b: Negative values in numeric / non_negative_numeric columns (excluding phone)
+        if not is_phone_col and not is_email_col and (
+            inferred_type in ("non_negative_numeric", "numeric", "currency", "salary", "age", "integer", "float")
+            or pd.api.types.is_numeric_dtype(col_series)
+        ):
             coerced_nums = pd.to_numeric(col_series.apply(clean_numeric_value), errors="coerce")
             neg_mask = coerced_nums < 0
             neg_count = int(neg_mask.sum())
@@ -543,9 +642,16 @@ def apply_pipeline(
                 cleaned_df.loc[non_null_mask, col] = (
                     cleaned_df.loc[non_null_mask, col]
                     .astype(str)
-                    .str.strip()
-                    .str.replace(r"\s+", " ", regex=True)
+                    .apply(normalize_whitespace_string)
                 )
+        elif action == "flag_missing":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                col_s = cleaned_df[col]
+                missing_mask = col_s.isna() | col_s.astype(str).str.strip().str.lower().isin(MISSING_TOKENS)
+                if missing_mask.any():
+                    cleaned_df.loc[missing_mask, col] = None
+                    cleaned_df[f"{col}_flag_missing"] = missing_mask
         elif action == "normalize_case":
             col = params.get("column")
             case = params.get("case", "title")
@@ -614,13 +720,18 @@ def apply_pipeline(
         elif action == "coerce_numeric":
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                # Phase 1: Explicitly exclude phone columns from coerce_numeric
+                # Explicitly exclude phone and id columns from coerce_numeric
                 col_lower = col.lower()
                 is_phone = (col_lower in ("phone", "mobile", "contact_no")) or ("phone" in col_lower)
-                if not is_phone:
-                    # Phase 4: Strip commas and currency symbols before pd.to_numeric
+                is_id = (col_lower in ("id", "record_id", "user_id")) or ("id" in col_lower and not col_lower.endswith("_idx"))
+                if not is_phone and not is_id:
                     cleaned_series = cleaned_df[col].apply(clean_numeric_value)
-                    cleaned_df[col] = pd.to_numeric(cleaned_series, errors="coerce")
+                    num = pd.to_numeric(cleaned_series, errors="coerce")
+                    non_null = num.dropna()
+                    if not non_null.empty and (non_null % 1 == 0).all():
+                        cleaned_df[col] = num.astype("Int64")
+                    else:
+                        cleaned_df[col] = num
         elif action == "flag_negative_values":
             col = params.get("column")
             if col and col in cleaned_df.columns:
