@@ -407,7 +407,6 @@ STRICT_EMAIL_RE = re.compile(
 
 
 def validate_email(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
-    print(f"[DEBUG LOG] validate_email CALLED for col_name='{col_name}', series len={len(series)}", flush=True)
     issues: list[ValidationIssue] = []
 
     for idx, val in series.items():
@@ -501,11 +500,6 @@ def validate_email(series: pd.Series, col_name: str, config: dict | None = None)
                 severity=severity,
             ))
 
-    print(f"[DEBUG LOG] validate_email FINISHED for col_name='{col_name}', total issues found={len(issues)}", flush=True)
-    for iss in issues:
-        if "rahul123@gmail" in str(iss.raw_value):
-            print(f"[DEBUG LOG] validate_email RESULT for rahul123@gmail: issue='{iss.issue}', suggested='{iss.suggested_value}', severity='{iss.severity}'", flush=True)
-
     return issues
 
 
@@ -517,7 +511,6 @@ def validate_email(series: pd.Series, col_name: str, config: dict | None = None)
 INDIAN_MOBILE_STARTS = {"6", "7", "8", "9"}
 
 def validate_phone(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
-    print(f"[DEBUG LOG] validate_phone CALLED for col_name='{col_name}', series len={len(series)}", flush=True)
     config = config or {}
     expected_digits = config.get("expected_digits", 10)
     issues: list[ValidationIssue] = []
@@ -598,7 +591,6 @@ def validate_phone(series: pd.Series, col_name: str, config: dict | None = None)
                     confidence=100, suggested_value=digits, severity="info",
                 ))
 
-    print(f"[DEBUG LOG] validate_phone FINISHED for col_name='{col_name}', total issues found={len(issues)}", flush=True)
     return issues
 
 

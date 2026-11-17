@@ -528,8 +528,9 @@ def download_cleaned_dataset(
     fmt = format.lower()
 
     if fmt == "log":
+        log_path = str(Path(dataset.cleaned_storage_path).with_name(f"{dataset_id}_cleaning_log.csv"))
         try:
-            log_bytes = storage.load(f"{dataset_id}_cleaning_log.csv")
+            log_bytes = storage.load(log_path)
         except FileNotFoundError:
             log_bytes = cleaning_log_to_csv_bytes([])
         return Response(

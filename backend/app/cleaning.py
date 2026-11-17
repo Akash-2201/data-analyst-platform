@@ -645,9 +645,10 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                 continue
             s_vals = dedup_preview[cname].dropna().astype(str).map(normalize_whitespace_string)
             if is_em:
-                s_vals = s_vals.str.lower()
+                s_vals = s_vals.str.replace(r"\s+", "", regex=True).str.replace(r"@+", "@", regex=True).str.lower()
             elif is_ph:
                 s_vals = s_vals.map(lambda v: re.sub(r"\D", "", v[:-2] if v.endswith(".0") else v))
+                s_vals = s_vals.map(lambda d: d[-10:] if len(d) == 12 and d.startswith("91") else d)
             s_vals = s_vals[(s_vals != "") & (~s_vals.str.lower().isin(MISSING_TOKENS))]
             if len(s_vals) >= 2:
                 # Only treat as person-level duplicate key when column is predominantly unique (>50%)
@@ -796,10 +797,13 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         raw_samples.append(str(rv).strip())
                 if raw_samples:
                     sample_details = f" ({', '.join(raw_samples[:4])})"
+                step_params: dict[str, Any] = {"column": col_name, "flagged_count": len(flagged_items)}
+                if effective_type == "date":
+                    step_params["date_order"] = analyze_column_date_order(col_series)
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": action_name,
-                    "params": {"column": col_name, "flagged_count": len(flagged_items)},
+                    "params": step_params,
                     "description": (
                         f"Flag {len(flagged_items)} {effective_type} value"
                         f"{'s' if len(flagged_items) > 1 else ''}"
@@ -1051,6 +1055,7 @@ def apply_pipeline(
     original_cols = set(df.columns)
     log: list[dict[str, Any]] = []
     cell_log: list[dict[str, Any]] = []
+    col_date_orders: dict[str, str] = {}
     id_col = _find_id_column(cleaned_df)
 
     def _row_id_for(idx: Any) -> str:
@@ -1209,6 +1214,8 @@ def apply_pipeline(
             col = params.get("column")
             value_map = params.get("value_map") or {}
             if col and col in cleaned_df.columns and value_map:
+                if col not in col_date_orders:
+                    col_date_orders[col] = analyze_column_date_order(cleaned_df[col])
                 cleaned_df[col] = cleaned_df[col].replace(value_map)
                 resilient_map = {}
                 for k, v in value_map.items():
@@ -1428,7 +1435,7 @@ def apply_pipeline(
         elif action == "flag_invalid_date":
             col = params.get("column")
             if col and col in cleaned_df.columns:
-                date_order = analyze_column_date_order(cleaned_df[col])
+                date_order = params.get("date_order") or col_date_orders.get(col) or analyze_column_date_order(cleaned_df[col])
                 invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
                 ambig_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
                 suspect_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
@@ -1570,9 +1577,10 @@ def apply_pipeline(
                     is_ph = any(k in clow for k in ("phone", "mobile", "contact"))
                     s_vals = cleaned_df[cname].dropna().astype(str).map(normalize_whitespace_string)
                     if is_em:
-                        s_vals = s_vals.str.lower()
+                        s_vals = s_vals.str.replace(r"\s+", "", regex=True).str.replace(r"@+", "@", regex=True).str.lower()
                     elif is_ph:
                         s_vals = s_vals.map(lambda v: re.sub(r"\D", "", v[:-2] if v.endswith(".0") else v))
+                        s_vals = s_vals.map(lambda d: d[-10:] if len(d) == 12 and d.startswith("91") else d)
                     s_vals = s_vals[(s_vals != "") & (~s_vals.str.lower().isin(MISSING_TOKENS))]
                     if len(s_vals) >= 2 and (s_vals.nunique() / len(s_vals)) > 0.5:
                         dups = s_vals[s_vals.duplicated(keep=False)]
