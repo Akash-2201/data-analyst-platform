@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -39,6 +40,11 @@ OPPOSITES: set[tuple[str, str]] = {
 
 from app.validation_rules import (
     COLUMN_VALIDATION_RULES,
+    DOMAIN_RULES,
+    UNITS_DICT,
+    TENS_DICT,
+    SCALES_DICT,
+    words_to_number,
     validate_column,
     detect_semantic_type,
     validate_email as _vr_validate_email,
@@ -48,9 +54,14 @@ from app.validation_rules import (
     validate_gender as _vr_validate_gender,
     validate_boolean as _vr_validate_boolean,
     validate_currency as _vr_validate_currency,
+    validate_salary as _vr_validate_salary,
     validate_percentage as _vr_validate_percentage,
     validate_zipcode as _vr_validate_zipcode,
     validate_id as _vr_validate_id,
+    validate_date as _vr_validate_date,
+    validate_latitude as _vr_validate_latitude,
+    validate_longitude as _vr_validate_longitude,
+    validate_quantity as _vr_validate_quantity,
     detect_outliers_iqr,
     detect_dataset_level_issues,
     run_all_cross_column_validations,
@@ -91,61 +102,19 @@ COLUMN_TYPE_RULES: dict[str, callable] = {
     "gender": _make_type_adapter(_vr_validate_gender),
     "boolean": _make_type_adapter(_vr_validate_boolean),
     "currency": _make_type_adapter(_vr_validate_currency),
+    "salary": _make_type_adapter(_vr_validate_salary),
     "percentage": _make_type_adapter(_vr_validate_percentage),
     "zipcode": _make_type_adapter(_vr_validate_zipcode),
     "id": _make_type_adapter(_vr_validate_id),
+    "date": _make_type_adapter(_vr_validate_date),
+    "latitude": _make_type_adapter(_vr_validate_latitude),
+    "longitude": _make_type_adapter(_vr_validate_longitude),
+    "quantity": _make_type_adapter(_vr_validate_quantity),
 }
-
-UNITS_DICT: dict[str, int] = {
-    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
-    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
-    "seventeen": 17, "eighteen": 18, "nineteen": 19
-}
-TENS_DICT: dict[str, int] = {
-    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
-}
-SCALES_DICT: dict[str, int] = {"hundred": 100, "thousand": 1000, "million": 1000000}
 
 MISSING_TOKENS: set[str] = {
     "", "na", "n/a", "n.a.", "null", "none", "nan", "-", "?", "unknown", "not available", "n/d", "nil"
 }
-
-
-def words_to_number(s: str) -> int | None:
-    """Parse English number words (one ... ninety-nine, hundred, thousand) into an integer."""
-    if not isinstance(s, str):
-        return None
-    cleaned = s.lower().replace("-", " ").strip()
-    tokens = cleaned.split()
-    if not tokens:
-        return None
-    total = 0
-    current = 0
-    matched = False
-    for tok in tokens:
-        if tok in UNITS_DICT:
-            current += UNITS_DICT[tok]
-            matched = True
-        elif tok in TENS_DICT:
-            current += TENS_DICT[tok]
-            matched = True
-        elif tok in SCALES_DICT:
-            matched = True
-            scale = SCALES_DICT[tok]
-            if current == 0:
-                current = 1
-            if scale == 100:
-                current *= 100
-            else:
-                total += current * scale
-                current = 0
-        elif tok == "and":
-            continue
-        else:
-            return None
-    if not matched:
-        return None
-    return total + current
 
 
 def normalize_whitespace_string(s: str) -> str:
@@ -189,6 +158,187 @@ def clean_numeric_value(val: Any) -> Any:
         return -num if is_neg else num
     except (ValueError, TypeError):
         return cleaned
+
+
+DEFAULT_PHONE_COUNTRY: str = "IN"
+
+KNOWN_DOMAIN_TYPOS: dict[str, str] = {
+    "gmial.com": "gmail.com",
+    "gamil.com": "gmail.com",
+    "gmai.com": "gmail.com",
+    "gmaill.com": "gmail.com",
+    "yahooo.com": "yahoo.com",
+    "yaho.com": "yahoo.com",
+    "hotmial.com": "hotmail.com",
+    "outlok.com": "outlook.com",
+}
+
+EMAIL_RFC_REGEX = re.compile(r"^[a-zA-Z0-9_.+'\-]+@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$")
+
+EXPLICIT_DATE_FORMATS: list[str] = [
+    "%Y-%m-%d", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y",
+    "%d %B %Y", "%d %b %Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"
+]
+
+DMY_DATE_FORMATS: list[str] = ["%d/%m/%Y", "%d-%m-%Y"]
+MDY_DATE_FORMATS: list[str] = ["%m/%d/%Y", "%m-%d-%Y"]
+_SLASH_OR_DASH_DMY_RE = re.compile(r"^(\d{1,2})([/-])(\d{1,2})\2(\d{4})$")
+
+
+def analyze_column_date_order(series: pd.Series) -> str:
+    """Detect whether dd/mm vs mm/dd dates in a column can be disambiguated.
+    If any value has first part > 12 (and second <= 12) -> 'DMY'.
+    If any value has second part > 12 (and first <= 12) -> 'MDY'.
+    If ambiguous dd/mm vs mm/dd values exist with neither > 12 -> 'AMBIGUOUS'.
+    Otherwise -> 'UNAMBIGUOUS'.
+    """
+    has_first_gt_12 = False
+    has_second_gt_12 = False
+    has_ambig_candidate = False
+    for val in series.dropna():
+        s = normalize_whitespace_string(str(val))
+        m = _SLASH_OR_DASH_DMY_RE.match(s)
+        if not m:
+            continue
+        p1, p2 = int(m.group(1)), int(m.group(3))
+        if p1 > 12 and p2 <= 12:
+            has_first_gt_12 = True
+        elif p2 > 12 and p1 <= 12:
+            has_second_gt_12 = True
+        elif 1 <= p1 <= 12 and 1 <= p2 <= 12 and p1 != p2:
+            has_ambig_candidate = True
+
+    if has_first_gt_12 and not has_second_gt_12:
+        return "DMY"
+    if has_second_gt_12 and not has_first_gt_12:
+        return "MDY"
+    if has_ambig_candidate:
+        return "AMBIGUOUS"
+    return "DMY"
+
+
+def clean_name_value(val: Any) -> tuple[str, bool]:
+    """Clean a customer name: strip whitespace/NBSP, remove digits and symbols except ' - . and space.
+    Change case ONLY if the whole value is all-lowercase or all-uppercase (-> Title Case).
+    Preserve mixed-case (McDonald, O'Brien, De Silva).
+    """
+    if val is None or pd.isna(val):
+        return "", False
+    s = normalize_whitespace_string(val)
+    if not s or s.lower() in MISSING_TOKENS:
+        return "", False
+    s_cleaned = re.sub(r"[^a-zA-Z\s.'\-]", "", s)
+    s_cleaned = re.sub(r"\s+", " ", s_cleaned).strip()
+    if not s_cleaned:
+        return "", True
+    if s_cleaned.islower() or s_cleaned.isupper():
+        s_cased = s_cleaned.title()
+    else:
+        s_cased = s_cleaned
+    return s_cased, (s_cased != str(val))
+
+
+def clean_email_value(val: Any) -> tuple[str | None, str, bool]:
+    """Clean email value: trim, lowercase, remove inner spaces, collapse repeated @.
+    Fix known domain typos & tld typos (.con -> .com, .cmo -> .com).
+    Returns (cleaned_val_or_None, status: 'valid'|'invalid'|'missing', changed: bool).
+    """
+    if val is None or pd.isna(val):
+        return None, "missing", False
+    s = normalize_whitespace_string(str(val)).lower()
+    if not s or s in MISSING_TOKENS:
+        return None, "missing", False
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"@+", "@", s)
+    if "@" not in s:
+        return None, "invalid", True
+    parts = s.split("@", 1)
+    local_part, domain_part = parts[0], parts[1]
+    if domain_part in KNOWN_DOMAIN_TYPOS:
+        domain_part = KNOWN_DOMAIN_TYPOS[domain_part]
+    elif domain_part.endswith(".con"):
+        domain_part = domain_part[:-4] + ".com"
+    elif domain_part.endswith(".cmo"):
+        domain_part = domain_part[:-4] + ".com"
+    candidate = f"{local_part}@{domain_part}"
+    if not EMAIL_RFC_REGEX.match(candidate):
+        return None, "invalid", True
+    return candidate, "valid", (candidate != str(val))
+
+
+def clean_phone_value(val: Any, default_country: str = DEFAULT_PHONE_COUNTRY) -> tuple[str | None, str, bool]:
+    """Clean phone value: strip non-digits, drop 91/0 for IN, require 10 digits starting 6-9.
+    Returns (cleaned_phone_or_None, status: 'valid'|'invalid'|'missing', changed: bool).
+    """
+    if val is None or pd.isna(val):
+        return None, "missing", False
+    s = normalize_whitespace_string(str(val))
+    if s.endswith(".0"):
+        s = s[:-2]
+    if not s or s.lower() in MISSING_TOKENS:
+        return None, "missing", False
+    # If alphabetic characters exist, invalid
+    if re.search(r"[a-zA-Z]", s):
+        return None, "invalid", True
+    digits = re.sub(r"\D", "", s)
+    if default_country == "IN":
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        if len(digits) == 10 and digits[0] in ("6", "7", "8", "9"):
+            return digits, "valid", (digits != str(val))
+        return None, "invalid", True
+    if 7 <= len(digits) <= 15:
+        return digits, "valid", (digits != str(val))
+    return None, "invalid", True
+
+
+def parse_explicit_date(val: Any, date_order: str = "DMY") -> tuple[str | None, str, bool]:
+    """Parse date with explicit format list, detect ambiguous/impossible dates and year bounds.
+    Returns (formatted_or_None, status: 'valid'|'invalid'|'missing'|'ambiguous'|'suspect', changed: bool).
+    """
+    if val is None or pd.isna(val):
+        return None, "missing", False
+    s = normalize_whitespace_string(str(val))
+    if not s:
+        return None, "missing", False
+    if s.lower() in ("not available", "unknown", "tbd", "tba", "invalid"):
+        return None, "invalid", True
+    if s.lower() in MISSING_TOKENS:
+        return None, "missing", False
+
+    parsed_dt = None
+    m = _SLASH_OR_DASH_DMY_RE.match(s)
+    if m:
+        p1, p2 = int(m.group(1)), int(m.group(3))
+        if date_order == "AMBIGUOUS" and 1 <= p1 <= 12 and 1 <= p2 <= 12 and p1 != p2:
+            return str(val), "ambiguous", False
+        fmts_to_try = DMY_DATE_FORMATS if date_order != "MDY" else MDY_DATE_FORMATS
+        for fmt in fmts_to_try:
+            try:
+                parsed_dt = datetime.strptime(s, fmt)
+                break
+            except (ValueError, TypeError):
+                continue
+    else:
+        for fmt in EXPLICIT_DATE_FORMATS:
+            try:
+                parsed_dt = datetime.strptime(s, fmt)
+                break
+            except (ValueError, TypeError):
+                continue
+
+    if parsed_dt is None:
+        return None, "invalid", True
+
+    current_year = datetime.now().year
+    if parsed_dt.year < 1900 or parsed_dt.year > current_year + 5:
+        out_str = parsed_dt.strftime("%Y-%m-%d")
+        return out_str, "suspect", (out_str != str(val))
+
+    out_str = parsed_dt.strftime("%Y-%m-%d")
+    return out_str, "valid", (out_str != str(val))
 
 
 def find_near_duplicate_categories(
@@ -274,6 +424,9 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
         col_name = col["name"]
         if col_name not in df.columns:
             continue
+        # Skip generated flag / outlier columns to guarantee idempotency (G5)
+        if "_flag_" in col_name or col_name.endswith("_outlier"):
+            continue
 
         col_series = df[col_name]
         missing_count = col.get("missing_count", 0)
@@ -301,7 +454,14 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
             if _eff in _PII_TYPES:
                 is_pii_col = True
 
-        if missing_count > 0:
+        # Exclude rows already explained by {col}_flag_invalid so reruns stay idempotent (G5)
+        unexplained_missing_count = missing_count
+        if missing_count > 0 and f"{col_name}_flag_invalid" in df.columns:
+            _inv_mask = df[f"{col_name}_flag_invalid"].fillna(False).astype(bool)
+            _cur_miss = col_series.isna() | col_series.astype(str).str.strip().str.lower().isin(MISSING_TOKENS)
+            unexplained_missing_count = int((_cur_miss & (~_inv_mask)).sum())
+
+        if unexplained_missing_count > 0:
             if missing_pct >= 50.0:
                 suggestions.append({
                     "id": str(uuid.uuid4()),
@@ -317,7 +477,7 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "action": "flag_missing",
                     "params": {"column": col_name},
                     "description": (
-                        f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} "
+                        f"Flag {unexplained_missing_count} missing value{'s' if unexplained_missing_count > 1 else ''} "
                         f"in '{col_name}' (unique-per-person column — row retained as null)"
                     ),
                     "severity": "medium",
@@ -330,14 +490,14 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "id": str(uuid.uuid4()),
                     "action": "flag_missing",
                     "params": {"column": col_name},
-                    "description": f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}'",
+                    "description": f"Flag {unexplained_missing_count} missing value{'s' if unexplained_missing_count > 1 else ''} in '{col_name}'",
                     "severity": "medium",
                 })
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "fill_missing",
                     "params": {"column": col_name, "strategy": "median"},
-                    "description": f"Fill {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}' with median",
+                    "description": f"Fill {unexplained_missing_count} missing value{'s' if unexplained_missing_count > 1 else ''} in '{col_name}' with median",
                     "severity": "low",
                     "recommended": False,
                 })
@@ -346,14 +506,14 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "id": str(uuid.uuid4()),
                     "action": "flag_missing",
                     "params": {"column": col_name},
-                    "description": f"Flag {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}'",
+                    "description": f"Flag {unexplained_missing_count} missing value{'s' if unexplained_missing_count > 1 else ''} in '{col_name}'",
                     "severity": "medium",
                 })
                 suggestions.append({
                     "id": str(uuid.uuid4()),
                     "action": "fill_missing",
                     "params": {"column": col_name, "strategy": "mode"},
-                    "description": f"Fill {missing_count} missing value{'s' if missing_count > 1 else ''} in '{col_name}' with mode",
+                    "description": f"Fill {unexplained_missing_count} missing value{'s' if unexplained_missing_count > 1 else ''} in '{col_name}' with mode",
                     "severity": "low",
                     "recommended": False,
                 })
@@ -369,9 +529,12 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
         elif is_email_col:
             effective_type = "email"
 
-        print(f"[DEBUG LOG] cleaning.py: col_name='{col_name}', effective_type='{effective_type}', is_phone_col={is_phone_col}, is_email_col={is_email_col}", flush=True)
+        is_coord_col = effective_type in ("latitude", "longitude")
+        is_name_col = effective_type == "name"
+        is_qty_col = effective_type == "quantity" or col_lower in ("quantity", "qty")
+        is_amount_col = effective_type in ("currency", "salary") or col_lower in ("amount", "price", "salary", "revenue", "cost")
+
         rule_fn = COLUMN_TYPE_RULES.get(effective_type)
-        print(f"[DEBUG LOG] cleaning.py: rule_fn found={rule_fn is not None}", flush=True)
         if rule_fn is not None:
             flagged_items = rule_fn(col_series, col_name)
             if flagged_items:
@@ -403,8 +566,8 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
 
         # Phase 3a & 4: Non-numeric text values or formatted numbers in numeric-typed columns (excluding phone)
         if not is_phone_col and not is_email_col and (
-            inferred_type in ("numeric", "non_negative_numeric", "identifier", "currency", "salary", "age", "integer", "float")
-            or effective_type in ("numeric", "non_negative_numeric", "currency", "salary", "age", "integer", "float")
+            inferred_type in ("numeric", "non_negative_numeric", "identifier", "currency", "salary", "age", "integer", "float", "quantity", "decimal")
+            or effective_type in ("numeric", "non_negative_numeric", "currency", "salary", "age", "integer", "float", "quantity", "decimal", "latitude", "longitude")
             or pd.api.types.is_numeric_dtype(col_series)
         ):
             non_null = col_series.dropna()
@@ -464,9 +627,10 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                             "severity": "medium",
                         })
 
-        # Phase 3b: Negative values in numeric / non_negative_numeric columns (excluding phone)
-        if not is_phone_col and not is_email_col and (
-            inferred_type in ("non_negative_numeric", "numeric", "currency", "salary", "age", "integer", "float")
+        # Phase 3b: Negative values in numeric / non_negative_numeric columns (excluding phone & coordinates)
+        if not is_phone_col and not is_email_col and not is_coord_col and (
+            inferred_type in ("non_negative_numeric", "numeric", "currency", "salary", "age", "integer", "float", "quantity")
+            or effective_type in ("currency", "salary", "age", "quantity")
             or pd.api.types.is_numeric_dtype(col_series)
         ):
             coerced_nums = pd.to_numeric(col_series.apply(clean_numeric_value), errors="coerce")
@@ -502,6 +666,33 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                     "flagged_values": flagged_items,
                 })
 
+            # Phase 3c: Zero values in quantity columns (keep value + flag_zero)
+            if is_qty_col:
+                zero_mask = coerced_nums == 0
+                zero_count = int(zero_mask.sum())
+                if zero_count > 0:
+                    suggestions.append({
+                        "id": str(uuid.uuid4()),
+                        "action": "flag_zero_values",
+                        "params": {"column": col_name},
+                        "description": f"Flag {zero_count} zero value{'s' if zero_count > 1 else ''} in '{col_name}' (value kept)",
+                        "severity": "medium",
+                    })
+
+            # Phase 3d: Sentinel values in amount/salary/price columns (keep value + flag_suspect)
+            if is_amount_col:
+                sentinels = DOMAIN_RULES["amount"]["sentinels"]
+                sentinel_mask = coerced_nums.isin(sentinels)
+                sentinel_count = int(sentinel_mask.sum())
+                if sentinel_count > 0:
+                    suggestions.append({
+                        "id": str(uuid.uuid4()),
+                        "action": "flag_suspect_values",
+                        "params": {"column": col_name},
+                        "description": f"Flag {sentinel_count} suspect sentinel value{'s' if sentinel_count > 1 else ''} in '{col_name}' (value kept)",
+                        "severity": "medium",
+                    })
+
         # Text cleanliness checks for text/categorical columns (excluding phone)
         if not is_phone_col and (inferred_type in ("text", "categorical", "email") or str(col_series.dtype) == "object"):
             non_null_str = col_series.dropna().astype(str)
@@ -520,8 +711,9 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
 
                 # 1b. Fuzzy category consistency (standardize_category)
                 has_category_clusters = False
-                is_date_col = inferred_type in ("datetime", "date") or any(k in col_name.lower() for k in ("date", "dob"))
-                if not is_date_col and inferred_type not in ("numeric", "non_negative_numeric", "identifier", "email") and (
+                is_date_col = inferred_type in ("datetime", "date") or effective_type == "date" or any(k in col_name.lower() for k in ("date", "dob"))
+                is_non_cat = is_date_col or is_name_col or is_email_col or is_phone_col or effective_type in ("id", "latitude", "longitude", "age", "quantity", "currency", "salary")
+                if not is_non_cat and inferred_type not in ("numeric", "non_negative_numeric", "identifier", "email") and (
                     inferred_type in ("categorical", "text")
                     or (str(col_series.dtype) == "object" and col_series.nunique() < 50)
                 ):
@@ -552,22 +744,23 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
                         })
                         has_category_clusters = True
 
-                # 1c. Inconsistent capitalization
-                stripped_str = non_null_str.str.strip()
-                lower_groups = stripped_str.groupby(stripped_str.str.lower()).nunique()
-                inconsistent_groups = lower_groups[lower_groups > 1]
-                if not inconsistent_groups.empty:
-                    title_cnt = int(stripped_str.apply(lambda s: s.istitle()).sum())
-                    lower_cnt = int(stripped_str.apply(lambda s: s.islower()).sum())
-                    case_param = "title" if title_cnt >= lower_cnt else "lower"
+                # 1c. Inconsistent capitalization (skip names/emails/ids/dates so mixed-case names like McDonald stay intact)
+                if not is_non_cat:
+                    stripped_str = non_null_str.str.strip()
+                    lower_groups = stripped_str.groupby(stripped_str.str.lower()).nunique()
+                    inconsistent_groups = lower_groups[lower_groups > 1]
+                    if not inconsistent_groups.empty:
+                        title_cnt = int(stripped_str.apply(lambda s: s.istitle()).sum())
+                        lower_cnt = int(stripped_str.apply(lambda s: s.islower()).sum())
+                        case_param = "title" if title_cnt >= lower_cnt else "lower"
 
-                    suggestions.append({
-                        "id": str(uuid.uuid4()),
-                        "action": "normalize_case",
-                        "params": {"column": col_name, "case": case_param},
-                        "description": f"Normalize inconsistent capitalization in '{col_name}' ({len(inconsistent_groups)} variant group{'s' if len(inconsistent_groups) > 1 else ''})",
-                        "severity": "low",
-                    })
+                        suggestions.append({
+                            "id": str(uuid.uuid4()),
+                            "action": "normalize_case",
+                            "params": {"column": col_name, "case": case_param},
+                            "description": f"Normalize inconsistent capitalization in '{col_name}' ({len(inconsistent_groups)} variant group{'s' if len(inconsistent_groups) > 1 else ''})",
+                            "severity": "low",
+                        })
 
         # 3. Numeric outlier checks (excluding phone)
         if not is_phone_col:
@@ -649,6 +842,9 @@ def apply_pipeline(
             if col and col in cleaned_df.columns:
                 col_s = cleaned_df[col]
                 missing_mask = col_s.isna() | col_s.astype(str).str.strip().str.lower().isin(MISSING_TOKENS)
+                invalid_col = f"{col}_flag_invalid"
+                if invalid_col in cleaned_df.columns:
+                    missing_mask = missing_mask & (~cleaned_df[invalid_col].fillna(False).astype(bool))
                 if missing_mask.any():
                     cleaned_df.loc[missing_mask, col] = None
                     cleaned_df[f"{col}_flag_missing"] = missing_mask
@@ -737,7 +933,266 @@ def apply_pipeline(
             if col and col in cleaned_df.columns:
                 cleaned_series = cleaned_df[col].apply(clean_numeric_value)
                 num = pd.to_numeric(cleaned_series, errors="coerce")
-                cleaned_df[f"{col}_flag_negative"] = num < 0
+                neg_mask = (num < 0).fillna(False)
+                if neg_mask.any():
+                    cleaned_df[f"{col}_flag_negative"] = neg_mask
+        elif action == "flag_zero_values":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                num = pd.to_numeric(cleaned_series, errors="coerce")
+                zero_mask = (num == 0).fillna(False)
+                if zero_mask.any():
+                    cleaned_df[f"{col}_flag_zero"] = zero_mask
+        elif action == "flag_suspect_values":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                cleaned_series = cleaned_df[col].apply(clean_numeric_value)
+                num = pd.to_numeric(cleaned_series, errors="coerce")
+                sentinels = DOMAIN_RULES["amount"]["sentinels"]
+                suspect_mask = num.isin(sentinels).fillna(False)
+                if suspect_mask.any():
+                    cleaned_df[f"{col}_flag_suspect"] = suspect_mask
+        elif action == "flag_invalid_name":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        continue
+                    s_raw = normalize_whitespace_string(str(val))
+                    if not s_raw or s_raw.lower() in MISSING_TOKENS:
+                        continue
+                    cleaned_val, changed = clean_name_value(val)
+                    if not cleaned_val:
+                        cleaned_df.at[idx, col] = None
+                        invalid_mask.at[idx] = True
+                    elif changed:
+                        cleaned_df.at[idx, col] = cleaned_val
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+        elif action == "flag_invalid_email":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        continue
+                    cleaned_val, status, changed = clean_email_value(val)
+                    if status == "invalid":
+                        cleaned_df.at[idx, col] = None
+                        invalid_mask.at[idx] = True
+                    elif status == "valid" and changed:
+                        cleaned_df.at[idx, col] = cleaned_val
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+        elif action == "flag_invalid_phone":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                cleaned_df[col] = cleaned_df[col].astype(object)
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        continue
+                    cleaned_val, status, changed = clean_phone_value(val)
+                    if status == "invalid":
+                        cleaned_df.at[idx, col] = None
+                        invalid_mask.at[idx] = True
+                    elif status == "valid" and (changed or not isinstance(val, str)):
+                        cleaned_df.at[idx, col] = cleaned_val
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+        elif action == "flag_invalid_age":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                min_age = DOMAIN_RULES["age"]["min"]
+                max_age = DOMAIN_RULES["age"]["max"]
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                new_vals: list[Any] = []
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        new_vals.append(None)
+                        continue
+                    s_raw = normalize_whitespace_string(str(val))
+                    if not s_raw or s_raw.lower() in MISSING_TOKENS:
+                        new_vals.append(None)
+                        continue
+                    parsed = clean_numeric_value(val)
+                    try:
+                        num = float(parsed)
+                        if pd.isna(num):
+                            raise ValueError
+                    except (ValueError, TypeError):
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                        continue
+                    if num < min_age or num > max_age:
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                    else:
+                        new_vals.append(int(num) if num % 1 == 0 else num)
+                num_series = pd.to_numeric(pd.Series(new_vals, index=cleaned_df.index), errors="coerce")
+                non_null = num_series.dropna()
+                if not non_null.empty and (non_null % 1 == 0).all():
+                    cleaned_df[col] = num_series.astype("Int64")
+                else:
+                    cleaned_df[col] = num_series
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+        elif action in ("flag_invalid_currency", "flag_invalid_salary"):
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                sentinels = DOMAIN_RULES["amount"]["sentinels"]
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                suspect_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                new_vals = []
+                changed_any = False
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        new_vals.append(val)
+                        continue
+                    s_raw = normalize_whitespace_string(str(val))
+                    if not s_raw or s_raw.lower() in MISSING_TOKENS:
+                        new_vals.append(None)
+                        changed_any = True
+                        continue
+                    parsed = clean_numeric_value(val)
+                    try:
+                        num = float(parsed)
+                        if pd.isna(num):
+                            raise ValueError
+                    except (ValueError, TypeError):
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                        changed_any = True
+                        continue
+                    if num < 0:
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                        changed_any = True
+                    elif num in sentinels:
+                        new_vals.append(val)
+                        suspect_mask.at[idx] = True
+                    else:
+                        if isinstance(val, str):
+                            new_vals.append(num)
+                            changed_any = True
+                        else:
+                            new_vals.append(val)
+                if changed_any:
+                    cleaned_df[col] = pd.to_numeric(pd.Series(new_vals, index=cleaned_df.index), errors="coerce")
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+                if suspect_mask.any():
+                    cleaned_df[f"{col}_flag_suspect"] = suspect_mask
+        elif action in ("flag_invalid_latitude", "flag_invalid_longitude"):
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                rule_key = "latitude" if action == "flag_invalid_latitude" else "longitude"
+                min_v = DOMAIN_RULES[rule_key]["min"]
+                max_v = DOMAIN_RULES[rule_key]["max"]
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                new_vals = []
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        new_vals.append(None)
+                        continue
+                    s_raw = normalize_whitespace_string(str(val))
+                    if not s_raw:
+                        new_vals.append(None)
+                        continue
+                    if s_raw.lower() in MISSING_TOKENS:
+                        new_vals.append(None)
+                        if s_raw.lower() in ("unknown", "not available"):
+                            invalid_mask.at[idx] = True
+                        continue
+                    try:
+                        num = float(s_raw)
+                        if pd.isna(num):
+                            raise ValueError
+                    except (ValueError, TypeError):
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                        continue
+                    if num < min_v or num > max_v:
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                    else:
+                        new_vals.append(num)
+                cleaned_df[col] = pd.to_numeric(pd.Series(new_vals, index=cleaned_df.index), errors="coerce")
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+        elif action == "flag_invalid_date":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                date_order = analyze_column_date_order(cleaned_df[col])
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                ambig_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                suspect_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        continue
+                    parsed_val, status, changed = parse_explicit_date(val, date_order=date_order)
+                    if status == "invalid":
+                        cleaned_df.at[idx, col] = None
+                        invalid_mask.at[idx] = True
+                    elif status == "ambiguous":
+                        ambig_mask.at[idx] = True
+                    elif status == "suspect":
+                        if changed and parsed_val is not None:
+                            cleaned_df.at[idx, col] = parsed_val
+                        suspect_mask.at[idx] = True
+                    elif status == "valid" and changed and parsed_val is not None:
+                        cleaned_df.at[idx, col] = parsed_val
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+                if ambig_mask.any():
+                    cleaned_df[f"{col}_flag_ambiguous"] = ambig_mask
+                if suspect_mask.any():
+                    cleaned_df[f"{col}_flag_suspect"] = suspect_mask
+        elif action == "flag_invalid_quantity":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                invalid_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                neg_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                zero_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                new_vals = []
+                for idx, val in cleaned_df[col].items():
+                    if val is None or pd.isna(val):
+                        new_vals.append(None)
+                        continue
+                    s_raw = normalize_whitespace_string(str(val))
+                    if not s_raw or s_raw.lower() in MISSING_TOKENS:
+                        new_vals.append(None)
+                        continue
+                    parsed = clean_numeric_value(val)
+                    try:
+                        num = float(parsed)
+                        if pd.isna(num):
+                            raise ValueError
+                    except (ValueError, TypeError):
+                        new_vals.append(None)
+                        invalid_mask.at[idx] = True
+                        continue
+                    if num < 0:
+                        neg_mask.at[idx] = True
+                    elif num == 0:
+                        zero_mask.at[idx] = True
+                    if num % 1 != 0:
+                        invalid_mask.at[idx] = True
+                    new_vals.append(int(num) if num % 1 == 0 else num)
+                num_series = pd.to_numeric(pd.Series(new_vals, index=cleaned_df.index), errors="coerce")
+                non_null = num_series.dropna()
+                if not non_null.empty and (non_null % 1 == 0).all():
+                    cleaned_df[col] = num_series.astype("Int64")
+                else:
+                    cleaned_df[col] = num_series
+                if invalid_mask.any():
+                    cleaned_df[f"{col}_flag_invalid"] = invalid_mask
+                if neg_mask.any():
+                    cleaned_df[f"{col}_flag_negative"] = neg_mask
+                if zero_mask.any():
+                    cleaned_df[f"{col}_flag_zero"] = zero_mask
         elif action == "clip_negative_to_null":
             col = params.get("column")
             if col and col in cleaned_df.columns:
@@ -779,8 +1234,9 @@ def apply_pipeline(
                         iqr = q3 - q1
                         lower_fence = q1 - 1.5 * iqr
                         upper_fence = q3 + 1.5 * iqr
-                        outlier_mask = (num < lower_fence) | (num > upper_fence)
-                        cleaned_df[f"{col}_outlier"] = outlier_mask.fillna(False)
+                        outlier_mask = ((num < lower_fence) | (num > upper_fence)).fillna(False)
+                        if outlier_mask.any():
+                            cleaned_df[f"{col}_outlier"] = outlier_mask
 
         rows_after = len(cleaned_df)
         rows_affected = max(0, rows_before - rows_after)

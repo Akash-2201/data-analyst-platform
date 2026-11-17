@@ -97,6 +97,10 @@ ALLOWED_OPERATIONS: set[str] = {
     "flag_invalid_age_group",
     "flag_invalid_integer",
     "flag_invalid_decimal",
+    "flag_invalid_latitude",
+    "flag_invalid_longitude",
+    "flag_zero_values",
+    "flag_suspect_values",
 }
 
 ALLOWED_SEVERITIES: set[str] = {"high", "medium", "low"}
@@ -972,6 +976,8 @@ def _generate_rule_based_pipeline(df: pd.DataFrame, profile: dict[str, Any]) -> 
 
     for col_meta in profile.get("columns", []):
         col_name = col_meta.get("name", "")
+        if "_flag_" in col_name or col_name.endswith("_outlier"):
+            continue
         if col_name in df.columns:
             if _is_datetime_column(df[col_name], col_meta):
                 date_cache[col_name] = _analyze_date_column(df[col_name], col_name)

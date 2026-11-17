@@ -117,13 +117,101 @@ class DatasetLevelIssue:
 
 NULL_VARIANTS: set[str] = {
     "na", "n/a", "null", "none", "nan", "nil", "undefined",
-    "not available", "not applicable", "missing",
+    "not available", "not applicable", "missing", "<na>", "nat",
 }
 
 PLACEHOLDER_VALUES: set[str] = {
     "?", "--", "---", "unknown", "tbd", "tba", "xxx", "placeholder",
     "test", "dummy", "sample", "example", "temp",
 }
+
+DOMAIN_RULES: dict[str, dict[str, Any]] = {
+    "age": {
+        "min": 0,
+        "max": 120,
+        "action_out_of_bounds": "blank_and_flag",
+    },
+    "amount": {
+        "min": 0,
+        "action_negative": "blank_and_flag",
+        "sentinels": {99999, 999999, 9999999, 99999999},
+        "action_sentinel": "keep_and_flag_suspect",
+    },
+    "salary": {
+        "min": 0,
+        "action_negative": "blank_and_flag",
+        "sentinels": {99999, 999999, 9999999, 99999999},
+        "action_sentinel": "keep_and_flag_suspect",
+    },
+    "price": {
+        "min": 0,
+        "action_negative": "blank_and_flag",
+        "sentinels": {99999, 999999, 9999999, 99999999},
+        "action_sentinel": "keep_and_flag_suspect",
+    },
+    "quantity": {
+        "action_negative": "keep_and_flag_negative",
+        "action_zero": "keep_and_flag_zero",
+        "integer_only": True,
+    },
+    "latitude": {
+        "min": -90.0,
+        "max": 90.0,
+        "action_out_of_bounds": "blank_and_flag",
+    },
+    "longitude": {
+        "min": -180.0,
+        "max": 180.0,
+        "action_out_of_bounds": "blank_and_flag",
+    },
+}
+
+UNITS_DICT: dict[str, int] = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+TENS_DICT: dict[str, int] = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+SCALES_DICT: dict[str, int] = {"hundred": 100, "thousand": 1000, "million": 1000000}
+
+
+def words_to_number(s: str) -> int | None:
+    """Parse English number words (one ... ninety-nine, hundred, thousand) into an integer."""
+    if not isinstance(s, str):
+        return None
+    cleaned = s.lower().replace("-", " ").strip()
+    tokens = cleaned.split()
+    if not tokens:
+        return None
+    total = 0
+    current = 0
+    matched = False
+    for tok in tokens:
+        if tok in UNITS_DICT:
+            current += UNITS_DICT[tok]
+            matched = True
+        elif tok in TENS_DICT:
+            current += TENS_DICT[tok]
+            matched = True
+        elif tok in SCALES_DICT:
+            matched = True
+            scale = SCALES_DICT[tok]
+            if current == 0:
+                current = 1
+            if scale == 100:
+                current *= 100
+            else:
+                total += current * scale
+                current = 0
+        elif tok == "and":
+            continue
+        else:
+            return None
+    if not matched:
+        return None
+    return total + current
 
 HIDDEN_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\r\n\t\u200b\u200c\u200d\ufeff\u00a0]")
 
@@ -253,28 +341,22 @@ def validate_name(series: pd.Series, col_name: str, config: dict | None = None) 
             ))
             continue
 
-        # No excessive special characters
-        special_count = len(re.findall(r"[^a-zA-Z\s.'\-]", cleaned))
-        if special_count > 2:
+        # No invalid special characters (allow only letters, spaces, apostrophe, hyphen, dot)
+        special_chars = re.findall(r"[^a-zA-Z\s.'\-]", cleaned)
+        if special_chars:
+            stripped_special = re.sub(r"[^a-zA-Z\s.'\-]", "", cleaned)
+            stripped_special = re.sub(r"\s{2,}", " ", stripped_special).strip()
+            sugg_name = stripped_special.title() if (stripped_special.islower() or (stripped_special.isupper() and len(stripped_special) > 1)) else stripped_special
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
-                issue="Name contains excessive special characters",
-                confidence=90, suggested_value=None, severity="warning",
+                issue="Name contains invalid special characters",
+                confidence=95, suggested_value=sugg_name or None, severity="warning",
             ))
             continue
 
-        # Standardize capitalization: title case
-        title_cased = cleaned.title()
-        if cleaned != title_cased and cleaned != cleaned.upper():
-            # Only flag if it's not already properly cased
-            needs_fix = (cleaned != title_cased)
-            if needs_fix:
-                issues.append(ValidationIssue(
-                    row_index=int(idx), raw_value=val,
-                    issue="Name capitalization non-standard",
-                    confidence=100, suggested_value=title_cased, severity="info",
-                ))
-        elif cleaned == cleaned.upper() and len(cleaned) > 1:
+        # Standardize capitalization: change case ONLY if all-lower or all-upper.
+        # Mixed-case names (McDonald, O'Brien, De Silva, Mary-Jane) are untouched.
+        if (cleaned.islower() or cleaned.isupper()) and len(cleaned) > 1:
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
                 issue="Name capitalization non-standard",
@@ -283,10 +365,11 @@ def validate_name(series: pd.Series, col_name: str, config: dict | None = None) 
 
         # Trim / multi-space fixes (suggest even if other issues exist)
         if str(val) != cleaned and not any(i.row_index == int(idx) for i in issues):
+            sugg_trimmed = cleaned.title() if ((cleaned.islower() or cleaned.isupper()) and len(cleaned) > 1) else cleaned
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
                 issue="Extra spaces in name",
-                confidence=100, suggested_value=cleaned.title(), severity="info",
+                confidence=100, suggested_value=sugg_trimmed, severity="info",
             ))
 
     return issues
@@ -316,7 +399,7 @@ EMAIL_TYPO_MAP: dict[str, str] = {
 }
 
 STRICT_EMAIL_RE = re.compile(
-    r"^[a-zA-Z0-9](?:[a-zA-Z0-9._%+\-]*[a-zA-Z0-9])?@"
+    r"^[a-zA-Z0-9](?:[a-zA-Z0-9._%+'\-]*[a-zA-Z0-9])?@"
     r"[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?"
     r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?)*"
     r"\.[a-zA-Z]{2,}$"
@@ -339,10 +422,10 @@ def validate_email(series: pd.Series, col_name: str, config: dict | None = None)
         confidence = 0
         severity = "error"
 
-        # No spaces
-        if re.search(r"\s", s):
+        # No spaces (leading, trailing, or inner)
+        if re.search(r"\s", str(val)):
             issue_text = f"Email contains whitespace"
-            suggested = re.sub(r"\s+", "", s)
+            suggested = re.sub(r"\s+", "", s).lower()
             confidence = 100
 
         # Exactly one @
@@ -525,7 +608,7 @@ def validate_phone(series: pd.Series, col_name: str, config: dict | None = None)
 
 def validate_age(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
     config = config or {}
-    max_age = config.get("max_age", 150)
+    max_age = config.get("max_age", DOMAIN_RULES["age"]["max"])
     issues: list[ValidationIssue] = []
 
     for idx, val in series.items():
@@ -535,16 +618,25 @@ def validate_age(series: pd.Series, col_name: str, config: dict | None = None) -
         if not s or s.lower() in NULL_VARIANTS:
             continue
 
-        # Try to parse as number
-        try:
-            num = float(s)
-        except (ValueError, TypeError):
+        # Try to parse as number (including English number words e.g. 'Twenty')
+        word_num = words_to_number(s)
+        if word_num is not None:
+            num = float(word_num)
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
-                issue="Wrong datatype for age (non-numeric)",
-                confidence=100, suggested_value=None, severity="error",
+                issue=f"Number word in age ('{s}' -> {word_num})",
+                confidence=95, suggested_value=int(word_num), severity="info",
             ))
-            continue
+        else:
+            try:
+                num = float(s)
+            except (ValueError, TypeError):
+                issues.append(ValidationIssue(
+                    row_index=int(idx), raw_value=val,
+                    issue="Wrong datatype for age (non-numeric)",
+                    confidence=100, suggested_value=None, severity="error",
+                ))
+                continue
 
         if num < 0:
             issues.append(ValidationIssue(
@@ -663,7 +755,16 @@ def validate_date(series: pd.Series, col_name: str, config: dict | None = None) 
         if val is None or (isinstance(val, float) and math.isnan(val)):
             continue
         s = str(val).strip()
-        if not s or s.lower() in NULL_VARIANTS:
+        if not s:
+            continue
+        if s.lower() in ("not available", "unknown", "tbd", "tba", "invalid"):
+            issues.append(ValidationIssue(
+                row_index=int(idx), raw_value=val,
+                issue="Invalid/non-date text",
+                confidence=100, suggested_value=None, severity="error",
+            ))
+            continue
+        if s.lower() in NULL_VARIANTS:
             continue
 
         parsed = _try_parse_date(s)
@@ -672,6 +773,14 @@ def validate_date(series: pd.Series, col_name: str, config: dict | None = None) 
                 row_index=int(idx), raw_value=val,
                 issue="Invalid/impossible date",
                 confidence=100, suggested_value=None, severity="error",
+            ))
+            continue
+
+        if parsed.year < 1900 or parsed.year > today.year + 5:
+            issues.append(ValidationIssue(
+                row_index=int(idx), raw_value=val,
+                issue=f"Suspect year in date ({parsed.year})",
+                confidence=90, suggested_value=None, severity="warning",
             ))
             continue
 
@@ -1100,6 +1209,22 @@ def validate_decimal(series: pd.Series, col_name: str, config: dict | None = Non
     return issues
 
 
+def validate_latitude(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
+    """Validate latitude values are within [-90, 90]."""
+    cfg = dict(config or {})
+    cfg.setdefault("min_value", DOMAIN_RULES["latitude"]["min"])
+    cfg.setdefault("max_value", DOMAIN_RULES["latitude"]["max"])
+    return validate_decimal(series, col_name, cfg)
+
+
+def validate_longitude(series: pd.Series, col_name: str, config: dict | None = None) -> list[ValidationIssue]:
+    """Validate longitude values are within [-180, 180]."""
+    cfg = dict(config or {})
+    cfg.setdefault("min_value", DOMAIN_RULES["longitude"]["min"])
+    cfg.setdefault("max_value", DOMAIN_RULES["longitude"]["max"])
+    return validate_decimal(series, col_name, cfg)
+
+
 # ---------------------------------------------------------------------------
 # §16  CURRENCY / PRICE validation
 # ---------------------------------------------------------------------------
@@ -1167,21 +1292,27 @@ def validate_currency(series: pd.Series, col_name: str, config: dict | None = No
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
                 issue=f"Negative currency value ({num})",
-                confidence=95, suggested_value=None, severity="warning",
+                confidence=95, suggested_value=None, severity="error",
+            ))
+        elif num in DOMAIN_RULES["amount"]["sentinels"]:
+            issues.append(ValidationIssue(
+                row_index=int(idx), raw_value=val,
+                issue=f"Suspect sentinel currency value ({num})",
+                confidence=90, suggested_value=val, severity="warning",
             ))
 
-        # Suggest normalized form (plain number)
-        try:
-            # Normalize: if result is an integer value, show as int
-            norm = int(num) if num == int(num) else num
-            if str(norm) != s:
-                issues.append(ValidationIssue(
-                    row_index=int(idx), raw_value=val,
-                    issue="Currency value needs normalization",
-                    confidence=99, suggested_value=norm, severity="info",
-                ))
-        except (OverflowError, ValueError):
-            pass
+        # Suggest normalized form only for formatted strings (not plain numbers)
+        if isinstance(val, str):
+            try:
+                norm = int(num) if num == int(num) else num
+                if str(norm) != s and not re.fullmatch(r"-?\d+(\.\d+)?", s):
+                    issues.append(ValidationIssue(
+                        row_index=int(idx), raw_value=val,
+                        issue="Currency value needs normalization",
+                        confidence=99, suggested_value=norm, severity="info",
+                    ))
+            except (OverflowError, ValueError):
+                pass
 
     return issues
 
@@ -2048,21 +2179,36 @@ def validate_quantity(series: pd.Series, col_name: str, config: dict | None = No
         if not s or s.lower() in NULL_VARIANTS:
             continue
 
-        try:
-            num = float(s)
-        except (ValueError, TypeError):
+        word_num = words_to_number(s)
+        if word_num is not None:
+            num = float(word_num)
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
-                issue="Non-numeric quantity",
-                confidence=100, suggested_value=None, severity="error",
+                issue=f"Number word in quantity ('{s}' -> {word_num})",
+                confidence=95, suggested_value=int(word_num), severity="info",
             ))
-            continue
+        else:
+            try:
+                num = float(s)
+            except (ValueError, TypeError):
+                issues.append(ValidationIssue(
+                    row_index=int(idx), raw_value=val,
+                    issue="Non-numeric quantity",
+                    confidence=100, suggested_value=None, severity="error",
+                ))
+                continue
 
         if num < 0:
             issues.append(ValidationIssue(
                 row_index=int(idx), raw_value=val,
                 issue=f"Negative quantity ({num})",
                 confidence=100, suggested_value=None, severity="error",
+            ))
+        elif num == 0:
+            issues.append(ValidationIssue(
+                row_index=int(idx), raw_value=val,
+                issue="Zero quantity (0)",
+                confidence=90, suggested_value=val, severity="warning",
             ))
         elif not allow_fractional and num != int(num):
             issues.append(ValidationIssue(
@@ -2634,6 +2780,10 @@ COLUMN_VALIDATION_RULES: dict[str, ValidationRuleEntry] = {
         ["experience", "exp", "years_of_experience", "work_experience"]),
     "time_duration": ValidationRuleEntry("time_duration", "Time Duration", validate_time_duration,
         ["duration", "time_duration", "elapsed", "time_spent"]),
+    "latitude": ValidationRuleEntry("latitude", "Latitude", validate_latitude,
+        ["latitude", "lat"]),
+    "longitude": ValidationRuleEntry("longitude", "Longitude", validate_longitude,
+        ["longitude", "lon", "lng", "long"]),
     "filepath": ValidationRuleEntry("filepath", "File Path", validate_filepath,
         ["file", "filename", "file_path", "filepath", "attachment", "document"]),
 }
@@ -2649,6 +2799,10 @@ def detect_semantic_type(series: pd.Series, col_name: str) -> str:
     name_lower = col_name.lower().strip().replace(" ", "_")
 
     # Priority 1: Exact or prefix/suffix column-name matching
+    # First check exact match against rule_key itself (e.g. "quantity" -> "quantity")
+    if name_lower in COLUMN_VALIDATION_RULES:
+        return name_lower
+
     # Sort by specificity: longer hints first, then by rule priority
     best_match = None
     best_match_len = 0
