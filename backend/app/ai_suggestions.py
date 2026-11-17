@@ -110,6 +110,7 @@ ALLOWED_OPERATIONS: set[str] = {
     "flag_invalid_longitude",
     "flag_zero_values",
     "flag_suspect_values",
+    "flag_possible_duplicates",
 }
 
 ALLOWED_SEVERITIES: set[str] = {"high", "medium", "low"}

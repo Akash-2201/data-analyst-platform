@@ -628,6 +628,44 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
             "severity": "high",
         })
 
+    # 1b. Possible duplicate rows (same non-blank email or phone with different row data — flag only, never delete)
+    dedup_preview = df.drop_duplicates()
+    if len(dedup_preview) >= 2:
+        dup_key_cols: list[str] = []
+        poss_dup_mask = pd.Series(False, index=dedup_preview.index, dtype=bool)
+        for col_meta in profile.get("columns", []):
+            cname = col_meta["name"]
+            if cname not in dedup_preview.columns or "_flag_" in cname or cname.endswith("_outlier"):
+                continue
+            ctype = col_meta.get("inferred_type", "text")
+            clow = cname.lower()
+            is_em = (ctype == "email") or any(k in clow for k in ("email", "e-mail"))
+            is_ph = (ctype == "phone") or any(k in clow for k in ("phone", "mobile", "contact"))
+            if not (is_em or is_ph):
+                continue
+            s_vals = dedup_preview[cname].dropna().astype(str).map(normalize_whitespace_string)
+            if is_em:
+                s_vals = s_vals.str.lower()
+            elif is_ph:
+                s_vals = s_vals.map(lambda v: re.sub(r"\D", "", v[:-2] if v.endswith(".0") else v))
+            s_vals = s_vals[(s_vals != "") & (~s_vals.str.lower().isin(MISSING_TOKENS))]
+            if len(s_vals) >= 2:
+                # Only treat as person-level duplicate key when column is predominantly unique (>50%)
+                if (s_vals.nunique() / len(s_vals)) > 0.5:
+                    dups = s_vals[s_vals.duplicated(keep=False)]
+                    if not dups.empty:
+                        dup_key_cols.append(cname)
+                        poss_dup_mask.loc[dups.index] = True
+        if dup_key_cols and poss_dup_mask.any():
+            cnt = int(poss_dup_mask.sum())
+            suggestions.append({
+                "id": str(uuid.uuid4()),
+                "action": "flag_possible_duplicates",
+                "params": {"columns": dup_key_cols},
+                "description": f"Flag {cnt} possible duplicate rows sharing the same {', '.join(dup_key_cols)} (no rows deleted)",
+                "severity": "medium",
+            })
+
     # 2. Column missing values, text cleanliness, fuzzy categories, and numeric validity checks
     for col in profile.get("columns", []):
         col_name = col["name"]
@@ -1398,6 +1436,90 @@ def apply_pipeline(
                     cleaned_df[f"{col}_flag_negative"] = neg_mask
                 if zero_mask.any():
                     cleaned_df[f"{col}_flag_zero"] = zero_mask
+        elif action == "flag_invalid_id":
+            col = params.get("column")
+            if col and col in cleaned_df.columns:
+                cleaned_df[col] = cleaned_df[col].astype(object)
+                reassigned_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+
+                # Detect dominant ID pattern (e.g. REC-1001 -> prefix='REC-', width=4, max_num=1115)
+                id_pattern_re = re.compile(r"^([A-Za-z_\-\s]*?)(\d+)$")
+                prefix_counts: dict[str, int] = {}
+                prefix_max: dict[str, int] = {}
+                prefix_width: dict[str, int] = {}
+                all_existing_ids: set[str] = set()
+
+                for val in cleaned_df[col]:
+                    if val is None or pd.isna(val):
+                        continue
+                    s = normalize_whitespace_string(str(val))
+                    if not s or s.lower() in MISSING_TOKENS:
+                        continue
+                    all_existing_ids.add(s)
+                    m = id_pattern_re.match(s)
+                    if m:
+                        pfx, num_str = m.group(1), m.group(2)
+                        num_val = int(num_str)
+                        prefix_counts[pfx] = prefix_counts.get(pfx, 0) + 1
+                        prefix_max[pfx] = max(prefix_max.get(pfx, 0), num_val)
+                        prefix_width[pfx] = max(prefix_width.get(pfx, 0), len(num_str))
+
+                if prefix_counts:
+                    dom_prefix = max(prefix_counts, key=lambda p: prefix_counts[p])
+                    next_num = prefix_max[dom_prefix] + 1
+                    num_width = prefix_width[dom_prefix]
+                else:
+                    dom_prefix = "ID-"
+                    next_num = 1
+                    num_width = 4
+
+                seen_so_far: set[str] = set()
+                for idx, val in cleaned_df[col].items():
+                    s = ""
+                    if val is not None and not pd.isna(val):
+                        s = normalize_whitespace_string(str(val))
+                    is_blank = (not s) or (s.lower() in MISSING_TOKENS)
+                    is_collision = (not is_blank) and (s in seen_so_far)
+
+                    if is_blank or is_collision:
+                        while True:
+                            candidate = f"{dom_prefix}{str(next_num).zfill(num_width)}"
+                            next_num += 1
+                            if candidate not in all_existing_ids and candidate not in seen_so_far:
+                                break
+                        cleaned_df.at[idx, col] = candidate
+                        all_existing_ids.add(candidate)
+                        seen_so_far.add(candidate)
+                        reassigned_mask.at[idx] = True
+                    else:
+                        if s != str(val):
+                            cleaned_df.at[idx, col] = s
+                        seen_so_far.add(s)
+
+                if reassigned_mask.any():
+                    cleaned_df[f"{col}_flag_reassigned"] = reassigned_mask
+        elif action == "flag_possible_duplicates":
+            key_cols = params.get("columns") or []
+            if key_cols:
+                poss_mask = pd.Series(False, index=cleaned_df.index, dtype=bool)
+                for cname in key_cols:
+                    if cname not in cleaned_df.columns:
+                        continue
+                    clow = cname.lower()
+                    is_em = any(k in clow for k in ("email", "e-mail"))
+                    is_ph = any(k in clow for k in ("phone", "mobile", "contact"))
+                    s_vals = cleaned_df[cname].dropna().astype(str).map(normalize_whitespace_string)
+                    if is_em:
+                        s_vals = s_vals.str.lower()
+                    elif is_ph:
+                        s_vals = s_vals.map(lambda v: re.sub(r"\D", "", v[:-2] if v.endswith(".0") else v))
+                    s_vals = s_vals[(s_vals != "") & (~s_vals.str.lower().isin(MISSING_TOKENS))]
+                    if len(s_vals) >= 2 and (s_vals.nunique() / len(s_vals)) > 0.5:
+                        dups = s_vals[s_vals.duplicated(keep=False)]
+                        if not dups.empty:
+                            poss_mask.loc[dups.index] = True
+                if poss_mask.any():
+                    cleaned_df["_flag_possible_duplicate"] = poss_mask
         elif action == "clip_negative_to_null":
             col = params.get("column")
             if col and col in cleaned_df.columns:
