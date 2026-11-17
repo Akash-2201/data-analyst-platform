@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.ai_suggestions import generate_ai_suggestions, ALLOWED_OPERATIONS
 from app.gemini_config import GEMINI_MODELS_TO_TRY
-from app.cleaning import apply_pipeline
+from app.cleaning import apply_pipeline, cleaning_log_to_csv_bytes
 from app.database import Base, engine, get_db
 from app.models import Dataset, PipelineStep
 from app.profiling import profile_dataframe
@@ -364,6 +364,10 @@ def apply_cleaning_pipeline(
     csv_bytes = cleaned_df.to_csv(index=False).encode("utf-8")
     cleaned_path = storage.save(f"{dataset_id}_cleaned.csv", csv_bytes)
 
+    cell_log = cleaned_df.attrs.get("cleaning_log", [])
+    log_csv_bytes = cleaning_log_to_csv_bytes(cell_log)
+    storage.save(f"{dataset_id}_cleaning_log.csv", log_csv_bytes)
+
     dataset.cleaned_storage_path = cleaned_path
     dataset.cleaned_profile_json = cleaned_profile
     db.commit()
@@ -375,6 +379,7 @@ def apply_cleaning_pipeline(
         "cleaned_profile": cleaned_profile,
         "original_row_count": len(df),
         "cleaned_row_count": len(cleaned_df),
+        "cleaning_log_count": len(cell_log),
     }
 
 
@@ -506,7 +511,7 @@ def preview_cleaning_pipeline(
 @app.get("/datasets/{dataset_id}/download-cleaned")
 def download_cleaned_dataset(
     dataset_id: str,
-    format: str = Query("csv", pattern="^(csv|xlsx)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|log)$"),
     db: Session = Depends(get_db),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> Response:
@@ -518,16 +523,28 @@ def download_cleaned_dataset(
     _verify_ownership(dataset, user)
 
     storage = get_storage()
+    orig_filename = dataset.filename or "dataset.csv"
+    stem = Path(orig_filename).stem or "dataset"
+    fmt = format.lower()
+
+    if fmt == "log":
+        try:
+            log_bytes = storage.load(f"{dataset_id}_cleaning_log.csv")
+        except FileNotFoundError:
+            log_bytes = cleaning_log_to_csv_bytes([])
+        return Response(
+            content=log_bytes,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{stem}_cleaning_log.csv"',
+            },
+        )
+
     try:
         csv_bytes = storage.load(dataset.cleaned_storage_path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Cleaned file not found in storage.")
 
-    # Base stem name from original dataset filename
-    orig_filename = dataset.filename or "dataset.csv"
-    stem = Path(orig_filename).stem or "dataset"
-
-    fmt = format.lower()
     if fmt == "xlsx":
         from openpyxl.utils import get_column_letter
 
@@ -537,17 +554,20 @@ def download_cleaned_dataset(
         cleaned_df = pd.read_csv(io.BytesIO(csv_bytes), dtype=str, keep_default_na=False)
 
         # Restore numeric dtypes for columns that are genuinely numeric,
-        # while leaving phone/email/text columns as str.
+        # while leaving phone/email/id/text columns as str.
         _PHONE_KEYWORDS = ("phone", "mobile", "contact")
         _EMAIL_KEYWORDS = ("email", "e-mail", "e_mail")
+        _ID_KEYWORDS = ("record_id", "user_id", "customer_id", "order_id")
         text_format_col_indices: list[int] = []  # 1-based indices for openpyxl
 
         for col_idx_0, col_name in enumerate(cleaned_df.columns):
             col_lower = str(col_name).lower()
             is_phone = any(kw in col_lower for kw in _PHONE_KEYWORDS)
             is_email = any(kw in col_lower for kw in _EMAIL_KEYWORDS)
+            is_id = col_lower == "id" or any(kw in col_lower for kw in _ID_KEYWORDS)
+            is_flag = "_flag_" in col_name or col_name.endswith("_outlier")
 
-            if is_phone or is_email:
+            if is_phone or is_email or is_id:
                 # Keep as string; replace literal "nan" with empty string
                 cleaned_df[col_name] = cleaned_df[col_name].replace("nan", "").replace("", "")
                 text_format_col_indices.append(col_idx_0 + 1)  # openpyxl is 1-based
@@ -555,13 +575,19 @@ def download_cleaned_dataset(
                     "Column '%s' (idx %d) forced to text dtype for Excel export",
                     col_name, col_idx_0,
                 )
+            elif is_flag:
+                cleaned_df[col_name] = cleaned_df[col_name].map(lambda v: str(v).strip().lower() == "true")
             else:
                 # Try to restore numeric dtype for genuinely numeric columns
                 coerced = pd.to_numeric(cleaned_df[col_name], errors="coerce")
                 # If ≥50% of non-empty values are valid numbers, treat as numeric
                 non_empty = cleaned_df[col_name][cleaned_df[col_name] != ""]
                 if len(non_empty) > 0 and coerced.notna().sum() >= len(non_empty) * 0.5:
-                    cleaned_df[col_name] = coerced
+                    valid_nums = coerced.dropna()
+                    if not valid_nums.empty and (valid_nums % 1 == 0).all():
+                        cleaned_df[col_name] = coerced.astype("Int64")
+                    else:
+                        cleaned_df[col_name] = coerced
 
         output = io.BytesIO()
         sheet_name = "Cleaned Data"

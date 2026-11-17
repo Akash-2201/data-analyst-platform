@@ -10,7 +10,7 @@ from __future__ import annotations
 import difflib
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -1021,26 +1021,86 @@ def suggest_cleaning_steps(df: pd.DataFrame, profile: dict[str, Any]) -> list[di
     return suggestions
 
 
+CLEANING_LOG_COLUMNS: list[str] = [
+    "row_id", "column", "old", "new", "rule", "confidence", "source", "timestamp"
+]
+
+
+def cleaning_log_to_csv_bytes(cell_log: list[dict[str, Any]]) -> bytes:
+    """Serialize cell-level cleaning log rows to UTF-8 CSV bytes."""
+    log_df = pd.DataFrame(cell_log, columns=CLEANING_LOG_COLUMNS)
+    return log_df.to_csv(index=False).encode("utf-8")
+
+
+def _find_id_column(df: pd.DataFrame) -> str | None:
+    """Find the primary ID column name (e.g. Record_ID, id) for human-readable row_id logging."""
+    for c in df.columns:
+        cl = str(c).lower().strip()
+        if cl in ("record_id", "id", "row_id", "order_id", "customer_id", "user_id"):
+            return c
+    return None
+
+
 def apply_pipeline(
     df: pd.DataFrame, steps: list[Any]
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
-    """Execute a list of cleaning steps sequentially on a DataFrame and return (cleaned_df, log)."""
+    """Execute a list of cleaning steps sequentially on a DataFrame and return (cleaned_df, log).
+    Also attaches cell-level audit entries to cleaned_df.attrs['cleaning_log'].
+    """
     cleaned_df = df.copy()
+    original_cols = set(df.columns)
     log: list[dict[str, Any]] = []
+    cell_log: list[dict[str, Any]] = []
+    id_col = _find_id_column(cleaned_df)
+
+    def _row_id_for(idx: Any) -> str:
+        if id_col and id_col in cleaned_df.columns and idx in cleaned_df.index:
+            v = cleaned_df.at[idx, id_col]
+            if v is not None and not pd.isna(v) and str(v).strip():
+                return str(v).strip()
+        return str(idx)
 
     for step in steps:
         if hasattr(step, "action"):
             action = step.action
             params = step.params or {}
             description = step.description
+            step_source = getattr(step, "source", None) or ("ai" if getattr(step, "ai_reason", None) else "rule")
+            step_conf = getattr(step, "confidence", None)
         else:
             action = step.get("action", "")
             params = step.get("params") or {}
             description = step.get("description", "")
+            step_source = step.get("source") or ("ai" if step.get("ai_reason") else "rule")
+            step_conf = step.get("confidence")
+
+        if step_conf is None:
+            step_conf = 1.0 if step_source == "rule" else 0.90
+        step_ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
         rows_before = len(cleaned_df)
+        target_col = params.get("column")
+        before_col_series = (
+            cleaned_df[target_col].copy()
+            if (target_col and target_col in cleaned_df.columns)
+            else None
+        )
+        before_index = cleaned_df.index.copy() if action == "drop_duplicates" else None
 
         if action == "drop_duplicates":
+            dup_mask = cleaned_df.duplicated(keep="first")
+            if dup_mask.any():
+                for idx in cleaned_df.index[dup_mask]:
+                    cell_log.append({
+                        "row_id": _row_id_for(idx),
+                        "column": "(row)",
+                        "old": "exact_duplicate",
+                        "new": "removed",
+                        "rule": "drop_duplicates",
+                        "confidence": 1.0,
+                        "source": step_source,
+                        "timestamp": step_ts,
+                    })
             cleaned_df = cleaned_df.drop_duplicates()
         elif action == "drop_column":
             col = params.get("column")
@@ -1565,6 +1625,41 @@ def apply_pipeline(
                         if outlier_mask.any():
                             cleaned_df[f"{col}_outlier"] = outlier_mask
 
+        # Record per-cell changes for the touched column (vectorized diff for performance)
+        if (
+            before_col_series is not None
+            and target_col in cleaned_df.columns
+            and len(cleaned_df) == len(before_col_series)
+        ):
+            after_col_series = cleaned_df[target_col]
+            both_na = before_col_series.isna() & after_col_series.isna()
+            same_str = before_col_series.astype(str) == after_col_series.astype(str)
+            changed_mask = ~(both_na | same_str)
+            if changed_mask.any():
+                for idx in cleaned_df.index[changed_mask]:
+                    old_v = before_col_series.loc[idx]
+                    new_v = after_col_series.loc[idx]
+                    # Skip numeric-representation-only diffs (e.g. 25.0 -> 25 when casting Int64)
+                    if pd.notna(old_v) and pd.notna(new_v):
+                        try:
+                            if isinstance(old_v, (int, float)) and isinstance(new_v, (int, float)) and float(old_v) == float(new_v):
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                    rule_label = action
+                    if pd.notna(old_v) and isinstance(old_v, str) and words_to_number(old_v.strip()) is not None:
+                        rule_label = "number_word_to_int"
+                    cell_log.append({
+                        "row_id": _row_id_for(idx),
+                        "column": target_col,
+                        "old": "" if pd.isna(old_v) else str(old_v),
+                        "new": "" if pd.isna(new_v) else str(new_v),
+                        "rule": rule_label,
+                        "confidence": step_conf,
+                        "source": step_source,
+                        "timestamp": step_ts,
+                    })
+
         rows_after = len(cleaned_df)
         rows_affected = max(0, rows_before - rows_after)
 
@@ -1576,4 +1671,14 @@ def apply_pipeline(
             "rows_affected": rows_affected,
         })
 
+    # Flag hygiene: drop any newly created flag/outlier column that has 0 True values
+    for c in list(cleaned_df.columns):
+        if c not in original_cols and ("_flag_" in c or c.endswith("_outlier")):
+            try:
+                if not cleaned_df[c].fillna(False).astype(bool).any():
+                    cleaned_df = cleaned_df.drop(columns=[c])
+            except Exception:
+                pass
+
+    cleaned_df.attrs["cleaning_log"] = cell_log
     return cleaned_df, log

@@ -30,7 +30,7 @@
 | STEP 2 | Type Rules (Name, Email, Phone, Date, Bounds) | DONE | 81.6% | 0 cells | PASS | PASS | `clean: type rules` |
 | STEP 3 | Categorical / City / Category Clustering | DONE | 95.9% | 0 cells | PASS | PASS | `clean: clustering` |
 | STEP 4 | Duplicates, Keys, Row Safety | DONE | 100.0% | 0 cells | PASS | PASS | `clean: duplicates and keys` |
-| STEP 5 | Cleaning Log + Flag Hygiene | NOT_STARTED | - | - | - | - | - |
+| STEP 5 | Cleaning Log + Flag Hygiene | DONE | 100.0% | 0 cells | PASS | PASS | `clean: cleaning log` |
 | STEP 6 | Hardening & Final Verification | NOT_STARTED | - | - | - | - | - |
 
 ### Step 1 Score Table (messy_project_testing_dataset_120_rows.xlsx)
