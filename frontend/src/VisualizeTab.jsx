@@ -17,6 +17,7 @@ export default function VisualizeTab({
   columns = [],
   datasetFilename = "Dashboard",
   userId = "default",
+  isActive = true,
 }) {
   return (
     <DashboardShell
@@ -24,6 +25,7 @@ export default function VisualizeTab({
       columns={columns}
       datasetFilename={datasetFilename}
       userId={userId}
+      isActive={isActive}
       renderTileContent={(tile, extraProps = {}) => (
         <ChartTileContent
           tile={tile}

@@ -2542,6 +2542,7 @@ export default function App() {
               columns={displayReport.columns || []}
               datasetFilename={displayReport.filename}
               userId={session?.user?.id || "default"}
+              isActive={activeTab === "visualize"}
             />
           </div>
         </div>

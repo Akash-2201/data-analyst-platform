@@ -31,6 +31,7 @@ export function DashboardShell({
   onExportPng,
   onExportCsv,
   onGenerateDashboard,
+  isActive = true,
 }) {
   const storageKey = `datalyst_dash_${userId}_${datasetId || "temp"}`;
 
@@ -88,7 +89,7 @@ export function DashboardShell({
   const toggleLeftPanel = useCallback(() => {
     setLeftPanelVisible((prev) => {
       const next = !prev;
-      try { sessionStorage.setItem("datalyst_viz_left_visible", JSON.stringify(next)); } catch {}
+      try { sessionStorage.setItem("datalyst_viz_left_visible", JSON.stringify(next)); } catch { }
       return next;
     });
   }, []);
@@ -96,7 +97,7 @@ export function DashboardShell({
   const toggleRightPanel = useCallback(() => {
     setRightPanelVisible((prev) => {
       const next = !prev;
-      try { sessionStorage.setItem("datalyst_viz_right_visible", JSON.stringify(next)); } catch {}
+      try { sessionStorage.setItem("datalyst_viz_right_visible", JSON.stringify(next)); } catch { }
       return next;
     });
   }, []);
@@ -111,17 +112,18 @@ export function DashboardShell({
   // Measure top offset relative to document top so fixed workspace starts exactly below navbar/tabs
   const measureTop = useCallback(() => {
     window.scrollTo(0, 0);
-    const tabSwitcher = document.querySelector(".tab-switcher");
-    if (tabSwitcher) {
-      const rect = tabSwitcher.getBoundingClientRect();
-      setWorkspaceTop(Math.max(0, Math.round(rect.bottom)));
-    } else if (placeholderRef.current) {
+    if (placeholderRef.current) {
       const rect = placeholderRef.current.getBoundingClientRect();
       setWorkspaceTop(Math.max(0, Math.round(rect.top)));
     }
   }, []);
 
   useEffect(() => {
+    if (!isActive) {
+      // Not the active tab — ensure body can scroll
+      document.body.style.overflow = "";
+      return;
+    }
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     measureTop();
@@ -132,7 +134,7 @@ export function DashboardShell({
       window.removeEventListener("resize", measureTop);
       clearInterval(interval);
     };
-  }, [measureTop]);
+  }, [measureTop, isActive]);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -163,11 +165,10 @@ export function DashboardShell({
   const theme = state.present.settings?.theme || "light";
 
   const handleToggleTheme = useCallback((targetTheme) => {
-    const validTarget = typeof targetTheme === "string" ? targetTheme : null;
-    const next = validTarget || (theme === "light" ? "dark" : "light");
+    const next = targetTheme || (theme === "light" ? "dark" : "light");
     try {
       localStorage.setItem("datalyst_viz_theme", next);
-    } catch {}
+    } catch { }
     dispatch({
       type: "SET_SETTINGS",
       payload: { theme: next },
@@ -357,6 +358,7 @@ export function DashboardShell({
           top: isFullscreen ? 0 : `${workspaceTop}px`,
           zIndex: 40,
           width: "100vw",
+          height: isFullscreen ? "100vh" : `calc(100vh - ${workspaceTop}px)`,
         }}
       >
         {/* LEFT PANEL (240px) */}
